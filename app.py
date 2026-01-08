@@ -28,10 +28,12 @@ class Student(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     roll_number = db.Column(db.String(20), unique=True, nullable=False)
     enrollment_number = db.Column(db.String(20), unique=True, nullable=False)
-    current_semester = db.Column(db.Integer, nullable=False)
+    current_semester = db.Column(db.Integer, nullable=False, default=2)
     branch = db.Column(db.String(50), nullable=False)
-    division = db.Column(db.String(5))  # e.g., 'A', 'B', 'C'
-    batch = db.Column(db.String(10))  # e.g., 'C1', 'C2'
+    division = db.Column(db.String(5))
+    batch = db.Column(db.String(10))
+    mentor = db.Column(db.String(100))
+    function = db.Column(db.Integer, default=1)  # 1=Active, 0=Inactive
     admission_year = db.Column(db.Integer, nullable=False)
     cgpa = db.Column(db.Float, default=0.0)
     photo_url = db.Column(db.String(500))
@@ -65,12 +67,11 @@ class Course(db.Model):
 
 class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    subject_code = db.Column(db.String(50), unique=True, nullable=False) # Increased length for user codes
-    subject_name = db.Column(db.String(200), nullable=False)
+    subject_code = db.Column(db.String(10), unique=True, nullable=False)
+    subject_name = db.Column(db.String(100), nullable=False)
     semester = db.Column(db.Integer, nullable=False)
     course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
     credits = db.Column(db.Integer, default=3)
-    subject_type = db.Column(db.String(50)) # Theory/Lab from SQL
     
     course = db.relationship('Course', backref='subjects')
 
@@ -202,8 +203,8 @@ class Timetable(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
     semester = db.Column(db.Integer, nullable=False)
-    division = db.Column(db.String(5), nullable=True) # Modified: nullable. A, B, C or None for common
-    batch = db.Column(db.String(10), nullable=True) # C1, C2, etc. or None
+    division = db.Column(db.String(5))
+    batch = db.Column(db.String(10))
     day_of_week = db.Column(db.String(10), nullable=False)  # monday, tuesday, etc.
     time_slot = db.Column(db.String(20), nullable=False)  # 09:00-10:00
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
@@ -214,6 +215,24 @@ class Timetable(db.Model):
     course = db.relationship('Course', backref='timetables')
     subject = db.relationship('Subject', backref='timetable_entries')
     faculty = db.relationship('Faculty', backref='timetable_entries')
+
+class LectureSwapRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timetable_id = db.Column(db.Integer, db.ForeignKey('timetable.id'), nullable=False)
+    request_date = db.Column(db.Date, nullable=False)
+    new_faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
+    new_subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
+    new_room = db.Column(db.String(20))
+    is_permanent = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
+    requested_by = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
+    reason = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    timetable = db.relationship('Timetable', backref='swap_requests')
+    new_faculty = db.relationship('Faculty', foreign_keys=[new_faculty_id])
+    new_subject = db.relationship('Subject', foreign_keys=[new_subject_id])
+    requester = db.relationship('Faculty', foreign_keys=[requested_by])
 
 class StudentQuery(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -334,8 +353,6 @@ def login():
                     'enrollment_number': student.enrollment_number,
                     'current_semester': student.current_semester,
                     'branch': student.branch,
-                    'division': student.division,
-                    'batch': student.batch,
                     'cgpa': student.cgpa
                 })
         elif user.role == 'faculty':
@@ -538,31 +555,18 @@ def get_student_timetable(student_id):
     if not student:
         return jsonify({'error': 'Student not found'}), 404
     
-    # Get timetable for student's course, semester matches, AND (batch match OR null batch)
-    if not student.division:
-         # Fallback to general course/semester
-        timetable_entries = Timetable.query.join(Course).filter(
-            Course.course_name == student.branch,
-            Timetable.semester == student.current_semester
-        ).all()
-    else:
-        # Get entries for the student's DIVISION
-        # AND ( entries with NO batch (Lectures) OR entries with MATCHING batch (Labs) )
-        timetable_entries = Timetable.query.join(Course).filter(
-            Course.course_name == student.branch,
-            Timetable.semester == student.current_semester,
-            Timetable.division == student.division,
-            db.or_(Timetable.batch == None, Timetable.batch == student.batch)
-        ).all()
+    # Get timetable for student's course and semester
+    timetable_entries = Timetable.query.join(Course).filter(
+        Course.course_name == student.branch,
+        Timetable.semester == student.current_semester
+    ).all()
     
     # Organize by day and time
     timetable = {}
-    
-    # Ensure all days are initialized for the frontend grid
     days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    
     for day in days:
         timetable[day] = {}
-        # Pre-fill common slots (optional, but API usually just returns what it has)
     
     for entry in timetable_entries:
         day = entry.day_of_week.lower()
@@ -724,7 +728,7 @@ def get_notices():
             'content': notice.content,
             'notice_type': notice.notice_type,
             'created_at': notice.created_at.isoformat(),
-            'expires_at': notice.expires_at.isoformat() if notice.expires_at else None
+            'expires_at': notice.expires_at.isoformat() if notice.expires_at else Noneat() if notice.expires_at else None
         })
     
     return jsonify(notices_data)
@@ -771,11 +775,81 @@ def get_admin_stats():
         'total_fee_collection': total_fee_collection
     })
 
+@app.route('/api/change-password', methods=['POST'])
+def change_password():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    old_password = data.get('old_password')
+    new_password = data.get('new_password')
+    
+    user = User.query.get(session['user_id'])
+    
+    if not user or not check_password_hash(user.password_hash, old_password):
+        return jsonify({'success': False, 'message': 'Incorrect old password'})
+    
+    user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': 'Password changed successfully'})
+
+@app.route('/api/faculty/reset-student-password', methods=['POST'])
+def reset_student_password():
+    if 'user_id' not in session or session.get('role') != 'faculty':
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.get_json()
+    student_id = data.get('student_id')
+    new_password = data.get('new_password')
+    
+    faculty_user = User.query.get(session['user_id'])
+    faculty = Faculty.query.filter_by(user_id=faculty_user.id).first()
+    
+    student = Student.query.get(student_id)
+    if not student:
+        return jsonify({'success': False, 'message': 'Student not found'})
+        
+    # Verify mentorship
+    if student.mentor != faculty.faculty_id:
+        return jsonify({'success': False, 'message': 'You are not authorized to reset this student password'})
+        
+    student.user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': 'Student password reset successfully'})
+
+@app.route('/api/faculty/my-mentees')
+def get_my_mentees():
+    if 'user_id' not in session or session.get('role') != 'faculty':
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    faculty_user = User.query.get(session['user_id'])
+    faculty = Faculty.query.filter_by(user_id=faculty_user.id).first()
+    
+    if not faculty:
+         return jsonify({'error': 'Faculty profile not found'}), 404
+         
+    # Find students where mentor matches faculty_id
+    # Note: Student.mentor stores the code (e.g. "MGV"), Faculty.faculty_id stores the same code.
+    mentees = Student.query.filter_by(mentor=faculty.faculty_id).all()
+    
+    mentees_data = []
+    for student in mentees:
+        mentees_data.append({
+            'id': student.id,
+            'name': student.user.full_name,
+            'roll_number': student.roll_number,
+            'branch': student.branch,
+            'cgpa': student.cgpa,
+            'enrollment_number': student.enrollment_number # Useful if needed
+        })
+        
+    return jsonify(mentees_data)
+
 # Initialize database
 def init_db():
     with app.app_context():
-        # Drop all tables to reset schema
-        db.drop_all()
         db.create_all()
         
         # Create sample data if tables are empty
@@ -791,7 +865,7 @@ def init_db():
             )
             db.session.add(admin)
             
-            # Create standard Faculty User (Placeholder for relations if needed)
+            # Create sample faculty
             faculty_user = User(
                 username='prof.smith',
                 email='prof.smith@college.edu',
@@ -802,8 +876,7 @@ def init_db():
             )
             db.session.add(faculty_user)
             
-            # Create sample student (Assigned to Semester 3, Division C, Batch C1)
-            # Updated to match the SQL data context
+            # Create sample student
             student_user = User(
                 username='2023001',
                 email='john.doe@student.college.edu',
@@ -816,15 +889,23 @@ def init_db():
             
             db.session.commit()
             
-            # Create Student Record
+            # Create faculty record
+            faculty_record = Faculty(
+                user_id=faculty_user.id,
+                faculty_id='FAC001',
+                designation='Assistant Professor',
+                experience_years=5,
+                specialization='Data Structures and Algorithms'
+            )
+            db.session.add(faculty_record)
+            
+            # Create student record with enhanced data
             student_record = Student(
                 user_id=student_user.id,
                 roll_number='2023001',
                 enrollment_number='EN2023001',
-                current_semester=3, # Updated to Semester 3
+                current_semester=5,
                 branch='Computer Science Engineering',
-                division='C', # Keeping consistent with user's previous preference
-                batch='C1',
                 admission_year=2023,
                 cgpa=8.5,
                 photo_url='https://via.placeholder.com/150x180',
@@ -837,7 +918,7 @@ def init_db():
             )
             db.session.add(student_record)
             
-            # Create Course
+            # Create sample course
             cse_course = Course(
                 course_code='CSE',
                 course_name='Computer Science Engineering',
@@ -846,143 +927,468 @@ def init_db():
                 total_semesters=8
             )
             db.session.add(cse_course)
+            
             db.session.commit()
-
-            # --- PARSING SQL DATA START ---
             
-            # 1. Faculty
-            faculty_codes = ['MCV', 'MVP', 'DVP', 'PSK', 'RKU', 'DKU', 'RHG', 'PHA', 'UMS', 'SSD', 'BNS', 'KMS', 'SPP', 'ZPB', 'AAP', 'AKS', 'BMS', 'KGR', 'MIN', 'JDP', 'SYD', 'POS', 'BAP', 'SOS', 'MMC', 'MHP', 'ZNP', 'FJO', 'PSP', 'DPS', 'HEJ', 'SHP', 'JVD', 'NAS', 'VBV', 'MSS', 'TAT', 'PRZ']
+            # Create sample subjects
+            subjects = [
+                Subject(course_id=cse_course.id, subject_code='CS501', subject_name='Data Structures', semester=5, credits=4),
+                Subject(course_id=cse_course.id, subject_code='CS502', subject_name='Algorithms', semester=5, credits=4),
+                Subject(course_id=cse_course.id, subject_code='CS503', subject_name='Database Systems', semester=5, credits=3),
+                Subject(course_id=cse_course.id, subject_code='CS504', subject_name='Computer Networks', semester=6, credits=4),
+                Subject(course_id=cse_course.id, subject_code='CS505', subject_name='Operating Systems', semester=6, credits=4),
+            ]
             
-            faculty_map = {} # Code -> ID
+            for subject in subjects:
+                db.session.add(subject)
             
-            for code in faculty_codes:
-                # Reuse the faculty_user for all for login simplicity, but separate Faculty records
-                # Ideally create Users for each, but for this demo, we just need Faculty records.
-                # However, Faculty model links to User. So we need Users or link to the same dummy user.
-                # Linking to same dummy user is fine for display.
-                
-                f = Faculty(
-                    user_id=faculty_user.id,
-                    faculty_id=code,
-                    designation='Assistant Professor',
-                    experience_years=5,
-                    specialization='Engineering'
+            db.session.commit()
+            
+            # Create sample events
+            events = [
+                Event(
+                    title='TechFest 2026',
+                    description='Annual technical festival featuring coding competitions, robotics, and innovation showcases.',
+                    event_type='technical',
+                    start_date=datetime(2026, 2, 15, 9, 0),
+                    end_date=datetime(2026, 2, 17, 18, 0),
+                    venue='Main Auditorium',
+                    organizer_name='Technical Society',
+                    contact_person='Dr. Rajesh Kumar',
+                    contact_phone='9876543210',
+                    contact_email='techfest@college.edu',
+                    registration_required=True,
+                    registration_deadline=datetime(2026, 2, 10, 23, 59),
+                    max_participants=500,
+                    created_by=admin.id
+                ),
+                Event(
+                    title='Cultural Night 2026',
+                    description='Showcase of music, dance, and theatrical performances by students.',
+                    event_type='cultural',
+                    start_date=datetime(2026, 3, 5, 18, 0),
+                    end_date=datetime(2026, 3, 5, 22, 0),
+                    venue='Open Air Theatre',
+                    organizer_name='Cultural Committee',
+                    contact_person='Prof. Priya Sharma',
+                    contact_phone='9876543211',
+                    contact_email='cultural@college.edu',
+                    registration_required=False,
+                    created_by=admin.id
+                ),
+                Event(
+                    title='AI/ML Workshop',
+                    description='Hands-on workshop on Artificial Intelligence and Machine Learning fundamentals.',
+                    event_type='workshop',
+                    start_date=datetime(2026, 1, 20, 10, 0),
+                    end_date=datetime(2026, 1, 22, 16, 0),
+                    venue='Computer Lab 1',
+                    organizer_name='CSE Department',
+                    contact_person='Dr. Amit Singh',
+                    contact_phone='9876543212',
+                    contact_email='aiml@college.edu',
+                    registration_required=True,
+                    registration_deadline=datetime(2026, 1, 15, 23, 59),
+                    max_participants=50,
+                    created_by=admin.id
                 )
-                db.session.add(f)
-                db.session.flush() # Get ID
-                faculty_map[code] = f.id
-
-            # 2. Subjects (Semester 3)
-            # Extracted from SQL INSERTs
-            subjects_data = [
-                ('PS(MCV)-301', 'Programming Skills - MCV', 'Theory'),
-                ('FCSP-1(MVP)-406-7/Lab', 'FCSP-1 MVP Lab', 'Lab'),
-                ('FSD-1(SPP)-410-B/Lab', 'FSD-1 SPP Lab', 'Lab'),
-                ('PS(PSK)-302', 'Programming Skills - PSK', 'Theory'),
-                ('FSD-1(PHA)-406-6/Lab', 'FSD-1 PHA Lab', 'Lab'),
-                ('DE(RHG)-311', 'Digital Electronics - RHG', 'Theory'),
-                ('DE(RHG)-302', 'Digital Electronics - RHG', 'Theory'), 
-                ('DE(SSD)-301', 'Digital Electronics - SSD', 'Theory'),
-                ('DE(SSD)-309-C', 'Digital Electronics - SSD', 'Theory'), # Using this one for Div C
-                ('FCSP-1(KMS)-406-7/Lab', 'FCSP-1 KMS Lab', 'Lab')
             ]
             
-            subject_map = {} # Code -> ID
+            for event in events:
+                db.session.add(event)
             
-            for code, name, type_ in subjects_data:
-                # Check duplicate code existence (SQL has duplicates in the list but unique constraint on db)
-                if not Subject.query.filter_by(subject_code=code).first():
-                    s = Subject(
-                        course_id=cse_course.id,
-                        subject_code=code,
-                        subject_name=name,
-                        semester=3,
-                        credits=4,
-                        subject_type=type_
-                    )
-                    db.session.add(s)
-                    db.session.flush()
-                    subject_map[code] = s.id
-
-            db.session.commit()
-
-            # 3. Timetable (Monday - Semester 3)
-            # Mapped to Division C where appropriate, or just generic 3
-            
-            # Slot Map
-            # A1: 08:45-09:45
-            # A2: 09:45-10:45
-            # A3: 11:30-12:30
-            # A4: 12:30-13:30
-            # A6: 08:45-09:45 (Alternative batch/division) -> We will insert these as Division C for visibility
-            # A7: 09:45-10:45
-            # A8: 11:30-12:30 
-            # A9: 12:30-13:30
-            
-            # I will select a cohesive set of subjects for Division C from the SQL data
-            # Based on the "DE(SSD)-309-C" hint, I will follow the SSD/RHG/etc usage for C if possible.
-            # actually, just inserting the User's exact INSERT sequence associated with "C" or similar.
-            # The SQL INSERT has:
-            # A1: PS(MCV)-301
-            # A2: FCSP-1(MVP)-406-7/Lab
-            # A3: FSD-1(SPP)-410-B/Lab
-            # A4: PS(PSK)-302
-            # A6: DE(RHG)-311
-            # A7: FSD-1(PHA)-406-6/Lab
-            # A8: DE(SSD)-301 
-            # A9: DE(RHG)-310
-            
-            # Since the student is C1, I will assign the ones that look like "C" or Labs to them.
-            # But to be safe and show data, I will assign the PRIMARY list (1-4) to Division C.
-            # And I'll add the "DE(SSD)" one as well.
-            
-            timetable_entries = [
-                # Monday
-                ('monday', '08:45-09:45', 'PS(MCV)-301', '301', 'MCV', 'Theory'),
-                ('monday', '09:45-10:45', 'FCSP-1(MVP)-406-7/Lab', '406-7', 'MVP', 'Lab'),
-                ('monday', '11:30-12:30', 'FSD-1(SPP)-410-B/Lab', '410-B', 'SPP', 'Lab'),
-                ('monday', '12:30-13:30', 'PS(PSK)-302', '302', 'PSK', 'Theory'),
-                
-                # Adding the "C" specific one explicitly
-                ('monday', '08:45-09:45', 'DE(SSD)-309-C', '309-C', 'SSD', 'Theory') # Conflict with 8:45 slot? Grid handles it or shows both.
+            # Create sample clubs
+            clubs = [
+                Club(
+                    name='Coding Club',
+                    description='Learn programming, participate in coding competitions, and build amazing projects.',
+                    category='technical',
+                    interests='programming,algorithms,competitive coding,web development,mobile apps',
+                    faculty_coordinator=faculty_record.id,
+                    student_coordinator='Rahul Sharma (2022001)',
+                    meeting_schedule='Every Friday 4:00 PM',
+                    contact_email='coding@college.edu'
+                ),
+                Club(
+                    name='Robotics Club',
+                    description='Design, build, and program robots for various competitions and projects.',
+                    category='technical',
+                    interests='robotics,electronics,automation,arduino,raspberry pi',
+                    faculty_coordinator=faculty_record.id,
+                    student_coordinator='Priya Patel (2022002)',
+                    meeting_schedule='Every Wednesday 3:00 PM',
+                    contact_email='robotics@college.edu'
+                ),
+                Club(
+                    name='Music Club',
+                    description='Express yourself through music - vocals, instruments, and composition.',
+                    category='cultural',
+                    interests='music,singing,guitar,piano,composition',
+                    student_coordinator='Arjun Mehta (2021003)',
+                    meeting_schedule='Every Tuesday & Thursday 5:00 PM',
+                    contact_email='music@college.edu'
+                ),
+                Club(
+                    name='Photography Club',
+                    description='Capture moments, learn photography techniques, and showcase your creativity.',
+                    category='cultural',
+                    interests='photography,editing,nature,portraits,events',
+                    student_coordinator='Sneha Gupta (2021004)',
+                    meeting_schedule='Every Saturday 2:00 PM',
+                    contact_email='photography@college.edu'
+                ),
+                Club(
+                    name='Sports Club',
+                    description='Stay fit, play various sports, and represent college in tournaments.',
+                    category='sports',
+                    interests='cricket,football,basketball,badminton,athletics',
+                    student_coordinator='Vikram Singh (2020005)',
+                    meeting_schedule='Daily 6:00 AM & 4:00 PM',
+                    contact_email='sports@college.edu'
+                )
             ]
             
-            for day, time, subj_code, room, fac_code, type_ in timetable_entries:
-                # Lookups
-                s_id = subject_map.get(subj_code)
-                f_id = faculty_map.get(fac_code)
-                
-                # If valid
-                if s_id and f_id:
-                     t = Timetable(
+            for club in clubs:
+                db.session.add(club)
+            
+            # Create sample timetable
+            timetable_data = [
+                ('monday', '09:00-10:00', 'CS501', 'Room 101'),
+                ('monday', '10:00-11:00', 'CS502', 'Room 101'),
+                ('monday', '11:30-12:30', 'CS503', 'Room 102'),
+                ('tuesday', '09:00-10:00', 'CS502', 'Room 101'),
+                ('tuesday', '10:00-11:00', 'CS501', 'Room 101'),
+                ('tuesday', '11:30-12:30', 'CS503', 'Room 102'),
+                ('wednesday', '09:00-10:00', 'CS501', 'Room 101'),
+                ('wednesday', '10:00-11:00', 'CS503', 'Room 102'),
+                ('thursday', '09:00-10:00', 'CS502', 'Room 101'),
+                ('thursday', '10:00-11:00', 'CS501', 'Room 101'),
+                ('friday', '09:00-10:00', 'CS503', 'Room 102'),
+                ('friday', '10:00-11:00', 'CS502', 'Room 101')
+            ]
+            
+            for day, time_slot, subject_code, room in timetable_data:
+                subject = Subject.query.filter_by(subject_code=subject_code).first()
+                if subject:
+                    timetable_entry = Timetable(
                         course_id=cse_course.id,
-                        semester=3,
-                        division='C', # Assign to C
-                        batch='C1',   # Assign to C1
+                        semester=5,
                         day_of_week=day,
-                        time_slot=time,
-                        subject_id=s_id,
-                        faculty_id=f_id,
+                        time_slot=time_slot,
+                        subject_id=subject.id,
+                        faculty_id=faculty_record.id,
                         room_number=room,
                         academic_year='2025-26'
-                     )
-                     db.session.add(t)
-
-            # Scholarships (Re-add)
-            scholarships_data = [
-                 Scholarship(name='MYSY', description='Merit Scholarship', category='merit', eligibility_criteria='80%+', amount=50000.0, deadline=datetime(2025, 12, 31).date(), official_website='https://mysy.guj.nic.in/'),
-                 Scholarship(name='Digital Gujarat', description='Post Matric', category='minority', eligibility_criteria='SEBC/SC/ST', amount=20000.0, deadline=datetime(2025, 11, 30).date(), official_website='https://www.digitalgujarat.gov.in/')
+                    )
+                    db.session.add(timetable_entry)
+            
+            # Create enhanced scholarships
+            real_scholarships = [
+                Scholarship(
+                    name='AICTE Pragati Scholarship for Girls',
+                    description='Empowering girl students in technical education. Aims to provide assistance for advancement of girls pursuing technical education.',
+                    category='merit',
+                    eligibility_criteria='Female students, Family income <= 8 LPA, Admitted to 1st year of Degree/Diploma level course.',
+                    min_cgpa=0.0,
+                    max_family_income=800000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='female',
+                    amount=50000,
+                    deadline=datetime(2026, 10, 31).date(),
+                    official_website='https://www.aicte-india.org/schemes/students-development-schemes/Pragati'
+                ),
+                Scholarship(
+                    name='AICTE Saksham Scholarship',
+                    description='Support for specially-abled children to pursue technical education. For students with disability of not less than 40%.',
+                    category='minority',
+                    eligibility_criteria='Differently-abled students (>40%), Family income <= 8 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=800000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=50000,
+                    deadline=datetime(2026, 10, 31).date(),
+                    official_website='https://www.aicte-india.org/schemes/students-development-schemes/Saksham'
+                ),
+                Scholarship(
+                    name='PM-USP Central Sector Scheme',
+                    description='Central Sector Scheme of Scholarship for College and University Students. For meritorious students from low-income families.',
+                    category='merit',
+                    eligibility_criteria='Top 20th percentile in Class 12, Family income < 4.5 LPA, Pursuing regular course.',
+                    min_cgpa=0.0,
+                    max_family_income=450000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=20000,
+                    deadline=datetime(2026, 12, 31).date(),
+                    official_website='https://scholarships.gov.in/public/schemeGuidelines/CSSS_Guidelines.pdf'
+                ),
+                Scholarship(
+                    name='Bharti Airtel Scholarship',
+                    description='To support deserving students from diverse socio-economic backgrounds, with a focus on girl students, in becoming future technology leaders.',
+                    category='need',
+                    eligibility_criteria='Top 50 NIRF Engineering Institute, Family income <= 8 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=800000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=100000,
+                    deadline=datetime(2026, 8, 31).date(),
+                    official_website='https://bhartifoundation.org/programs/higher-education/bharti-airtel-scholarship-program/'
+                ),
+                Scholarship(
+                    name='Reliance Foundation Scholarship',
+                    description='Identifying and nurturing India’s brightest students with leadership potential from all socio-economic backgrounds.',
+                    category='merit',
+                    eligibility_criteria='Passed 12th with >60%, Family income < 15 LPA, Enrolled in 1st year full-time degree.',
+                    min_cgpa=0.0,
+                    max_family_income=1500000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=200000,
+                    deadline=datetime(2026, 10, 15).date(),
+                    official_website='https://scholarships.reliancefoundation.org/'
+                ),
+                Scholarship(
+                    name='SBI Asha Scholarship',
+                    description='Scholarship Program by SBI Foundation for meritorious students from low-income families.',
+                    category='need',
+                    eligibility_criteria='75% marks in previous academic year, Family income < 3 LPA.',
+                    min_cgpa=7.5,
+                    max_family_income=300000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=50000,
+                    deadline=datetime(2026, 11, 30).date(),
+                    official_website='https://www.sbifoundation.in/asha-scholarship'
+                ),
+                Scholarship(
+                    name='Post Matric Scholarship for SC',
+                    description='Financial assistance to SC students studying at post-matriculation or post-secondary stage.',
+                    category='minority',
+                    eligibility_criteria='SC Students, Family income <= 2.5 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=250000,
+                    eligible_categories='sc',
+                    eligible_genders='all',
+                    amount=15000,
+                    deadline=datetime(2026, 11, 30).date(),
+                    official_website='https://socialjustice.gov.in/schemes/post-matric-scholarship-for-sc-students'
+                ),
+                Scholarship(
+                    name='Post Matric Scholarship for OBC',
+                    description='Financial assistance to OBC students studying at post-matriculation or post-secondary stage.',
+                    category='minority',
+                    eligibility_criteria='OBC Students, Family income <= 2.5 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=250000,
+                    eligible_categories='obc',
+                    eligible_genders='all',
+                    amount=10000,
+                    deadline=datetime(2026, 11, 30).date(),
+                    official_website='https://socialjustice.gov.in/schemes/post-matric-scholarship-for-obc-students'
+                )
             ]
-            for s in scholarships_data:
-                db.session.add(s)
-
+            
+            for s in real_scholarships:
+                existing = Scholarship.query.filter_by(name=s.name).first()
+                if existing:
+                    # Update existing record
+                    existing.official_website = s.official_website
+                    existing.description = s.description
+                    existing.eligibility_criteria = s.eligibility_criteria
+                    existing.amount = s.amount
+                    existing.deadline = s.deadline
+                    existing.max_family_income = s.max_family_income
+                    existing.min_cgpa = s.min_cgpa
+                    existing.eligible_categories = s.eligible_categories
+                    existing.eligible_genders = s.eligible_genders
+                else:
+                    # Add new record
+                    db.session.add(s)
+            
+            # Create comprehensive fee structures
+            fee_structures = [
+                FeeStructure(course_id=cse_course.id, semester=1, tuition_fee=45000, lab_fee=3000, library_fee=2000, other_fees=1000, total_fee=51000, academic_year='2025-26'),
+                FeeStructure(course_id=cse_course.id, semester=2, tuition_fee=45000, lab_fee=3000, library_fee=2000, other_fees=1000, total_fee=51000, academic_year='2025-26'),
+                FeeStructure(course_id=cse_course.id, semester=3, tuition_fee=48000, lab_fee=4000, library_fee=2000, other_fees=1000, total_fee=55000, academic_year='2025-26'),
+                FeeStructure(course_id=cse_course.id, semester=4, tuition_fee=48000, lab_fee=4000, library_fee=2000, other_fees=1000, total_fee=55000, academic_year='2025-26'),
+                FeeStructure(course_id=cse_course.id, semester=5, tuition_fee=50000, lab_fee=5000, library_fee=2000, other_fees=1000, total_fee=58000, academic_year='2025-26'),
+            ]
+            
+            for fee_structure in fee_structures:
+                db.session.add(fee_structure)
+            
+            # Create sample fee payment
+            fee_payment = FeePayment(
+                student_id=student_record.id,
+                fee_structure_id=5,  # 5th semester fee structure
+                amount_paid=58000,
+                payment_method='Online',
+                transaction_id='TXN123456789',
+                status='completed'
+            )
+            db.session.add(fee_payment)
+            
+            # Create sample notices
+            notices = [
+                Notice(
+                    title='Mid-Semester Examination Schedule Released',
+                    content='The mid-semester examination schedule for all departments has been published. Students are advised to check their respective timetables and prepare accordingly.',
+                    notice_type='exam',
+                    target_audience='students',
+                    created_by=admin.id,
+                    expires_at=datetime.utcnow() + timedelta(days=30)
+                ),
+                Notice(
+                    title='Republic Day Holiday',
+                    content='The college will remain closed on January 26th, 2026 on account of Republic Day. Regular classes will resume from January 27th.',
+                    notice_type='holiday',
+                    target_audience='all',
+                    created_by=admin.id,
+                    expires_at=datetime.utcnow() + timedelta(days=15)
+                ),
+                Notice(
+                    title='Technical Symposium 2026',
+                    content='Annual technical symposium will be held from February 15-17, 2026. Students are encouraged to participate in various technical events.',
+                    notice_type='event',
+                    target_audience='students',
+                    created_by=admin.id,
+                    expires_at=datetime.utcnow() + timedelta(days=45)
+                )
+            ]
+            
+            for notice in notices:
+                db.session.add(notice)
+            
             db.session.commit()
-            print("SQL Migration Complete using Semester 3 Data.")
+            
+            print("Comprehensive sample data created successfully!")
+
+        # Ensure authentic scholarships exist (even if DB was already initialized)
+        if Scholarship.query.filter_by(name='AICTE Pragati Scholarship for Girls').count() == 0:
+            print("Adding authentic scholarships...")
+            # Optional: Clear old dummy scholarships if they exist and no applications linked
+            # try:
+            #     if ScholarshipApplication.query.count() == 0:
+            #         Scholarship.query.delete()
+            #         db.session.commit()
+            # except:
+            #     pass
+
+            real_scholarships = [
+                Scholarship(
+                    name='AICTE Pragati Scholarship for Girls',
+                    description='Empowering girl students in technical education. Aims to provide assistance for advancement of girls pursuing technical education.',
+                    category='merit',
+                    eligibility_criteria='Female students, Family income <= 8 LPA, Admitted to 1st year of Degree/Diploma level course.',
+                    min_cgpa=0.0,
+                    max_family_income=800000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='female',
+                    amount=50000,
+                    deadline=datetime(2026, 10, 31).date(),
+                    official_website='https://www.aicte-india.org/schemes/students-development-schemes/Pragati'
+                ),
+                Scholarship(
+                    name='AICTE Saksham Scholarship',
+                    description='Support for specially-abled children to pursue technical education. For students with disability of not less than 40%.',
+                    category='minority',
+                    eligibility_criteria='Differently-abled students (>40%), Family income <= 8 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=800000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=50000,
+                    deadline=datetime(2026, 10, 31).date(),
+                    official_website='https://www.aicte-india.org/schemes/students-development-schemes/Saksham'
+                ),
+                Scholarship(
+                    name='PM-USP Central Sector Scheme',
+                    description='Central Sector Scheme of Scholarship for College and University Students. For meritorious students from low-income families.',
+                    category='merit',
+                    eligibility_criteria='Top 20th percentile in Class 12, Family income < 4.5 LPA, Pursuing regular course.',
+                    min_cgpa=0.0,
+                    max_family_income=450000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=20000,
+                    deadline=datetime(2026, 12, 31).date(),
+                    official_website='https://scholarships.gov.in/public/schemeGuidelines/CSSS_Guidelines.pdf'
+                ),
+                Scholarship(
+                    name='Bharti Airtel Scholarship',
+                    description='To support deserving students from diverse socio-economic backgrounds, with a focus on girl students, in becoming future technology leaders.',
+                    category='need',
+                    eligibility_criteria='Top 50 NIRF Engineering Institute, Family income <= 8 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=800000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=100000,
+                    deadline=datetime(2026, 8, 31).date(),
+                    official_website='https://bhartifoundation.org/programs/higher-education/bharti-airtel-scholarship-program/'
+                ),
+                Scholarship(
+                    name='Reliance Foundation Scholarship',
+                    description='Identifying and nurturing India’s brightest students with leadership potential from all socio-economic backgrounds.',
+                    category='merit',
+                    eligibility_criteria='Passed 12th with >60%, Family income < 15 LPA, Enrolled in 1st year full-time degree.',
+                    min_cgpa=0.0,
+                    max_family_income=1500000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=200000,
+                    deadline=datetime(2026, 10, 15).date(),
+                    official_website='https://scholarships.reliancefoundation.org/Undergraduate_Scholarship.aspx'
+                ),
+                Scholarship(
+                    name='SBI Asha Scholarship',
+                    description='Scholarship Program by SBI Foundation for meritorious students from low-income families.',
+                    category='need',
+                    eligibility_criteria='75% marks in previous academic year, Family income < 3 LPA.',
+                    min_cgpa=7.5,
+                    max_family_income=300000,
+                    eligible_categories='general,obc,sc,st,ews',
+                    eligible_genders='all',
+                    amount=50000,
+                    deadline=datetime(2026, 11, 30).date(),
+                    official_website='https://www.sbifoundation.in/asha-scholarship'
+                ),
+                Scholarship(
+                    name='Post Matric Scholarship for SC',
+                    description='Financial assistance to SC students studying at post-matriculation or post-secondary stage.',
+                    category='minority',
+                    eligibility_criteria='SC Students, Family income <= 2.5 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=250000,
+                    eligible_categories='sc',
+                    eligible_genders='all',
+                    amount=15000,
+                    deadline=datetime(2026, 11, 30).date(),
+                    official_website='https://socialjustice.gov.in/schemes/post-matric-scholarship-for-sc-students'
+                ),
+
+                Scholarship(
+                    name='Post Matric Scholarship for OBC',
+                    description='Financial assistance to OBC students studying at post-matriculation or post-secondary stage.',
+                    category='minority',
+                    eligibility_criteria='OBC Students, Family income <= 2.5 LPA.',
+                    min_cgpa=0.0,
+                    max_family_income=250000,
+                    eligible_categories='obc',
+                    eligible_genders='all',
+                    amount=10000,
+                    deadline=datetime(2026, 11, 30).date(),
+                    official_website='https://socialjustice.gov.in/schemes/post-matric-scholarship-for-obc-students'
+                )
+            ]
+            
+            for s in real_scholarships:
+                db.session.add(s)
+            db.session.commit()
+            print("Authentic scholarships added.")
 
 if __name__ == '__main__':
-    if not os.path.exists('eduportal.db'):
-        init_db()
-    else:
-        init_db() 
-        
+    init_db()
     app.run(debug=True, port=5001)

@@ -395,20 +395,20 @@ function findScholarships() {
 }
 
 // Update scholarships display
+// Horizontal layout container style
 function updateScholarshipsDisplay(scholarships) {
     const container = document.getElementById('scholarshipCards');
     if (!container) return;
 
     container.innerHTML = '';
 
-    // Use Flex Column for vertical list layout (Top-Bottom)
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
+    container.style.display = 'grid';
     container.style.gap = '20px';
+    container.style.gridTemplateColumns = '1fr'; // Full width cards
 
     if (scholarships.length === 0) {
         container.innerHTML = `
-            <div style="text-align: center; padding: 40px; background: #f8f9fa; border-radius: 8px; width: 100%;">
+            <div style="grid-column: 1/-1; text-align: center; padding: 40px; background: #f8f9fa; border-radius: 8px;">
                 <i class="fas fa-search-minus" style="font-size: 2rem; color: #6c757d; margin-bottom: 15px;"></i>
                 <p>No scholarships found matching your specific criteria.</p>
                 <p>Try adjusting your filters or checking back later.</p>
@@ -422,76 +422,57 @@ function updateScholarshipsDisplay(scholarships) {
         // Horizontal Card Styling
         card.style.background = 'white';
         card.style.borderRadius = '12px';
-        card.style.padding = '0'; // Padding handled by internal containers
+        card.style.padding = '25px';
         card.style.boxShadow = '0 4px 15px rgba(0,0,0,0.05)';
         card.style.display = 'flex';
-        card.style.flexDirection = 'row'; // Horizontal layout
-        card.style.overflow = 'hidden';
-        card.style.border = '1px solid #e0e0e0';
-        card.style.transition = 'transform 0.2s, box-shadow 0.2s';
-
-        // Add hover effect via JS since inline styles are hard for hover
-        card.onmouseenter = () => { card.style.transform = 'translateY(-2px)'; card.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)'; };
-        card.onmouseleave = () => { card.style.transform = 'translateY(0)'; card.style.boxShadow = '0 4px 15px rgba(0,0,0,0.05)'; };
-
-        // Left blue accent strip
-        const accentColor = scholarship.eligible ? '#4caf50' : '#1565c0'; // Green if eligible logic was used, else Blue
+        card.style.flexDirection = 'row'; // Horizontal
+        card.style.alignItems = 'center';
+        card.style.justifyContent = 'space-between';
+        card.style.flexWrap = 'wrap'; // Responsive wrap
+        card.style.gap = '20px';
+        card.style.borderLeft = '5px solid #1a237e'; // Accent border
 
         card.innerHTML = `
-            <div style="width: 6px; background: ${accentColor}; flex-shrink: 0;"></div>
-            
-            <div style="flex: 1; padding: 25px; display: flex; flex-direction: column; justify-content: center;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
-                    <h3 style="color: #1a237e; font-size: 1.3rem; margin: 0; font-weight: 600;">${scholarship.name}</h3>
-                    <span style="background: #e3f2fd; color: #1565c0; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 500;">
-                        ${scholarship.category.toUpperCase()}
-                    </span>
-                </div>
-                
-                <p style="color: #546e7a; font-size: 0.95rem; line-height: 1.5; margin-bottom: 15px;">${scholarship.description}</p>
-                
-                <div style="display: flex; flex-wrap: wrap; gap: 20px; font-size: 0.9rem; color: #455a64;">
-                    <div style="display: flex; align-items: center;">
-                        <i class="fas fa-rupee-sign" style="color: #ff9800; margin-right: 8px;"></i>
-                        <span style="font-weight: 600;">₹${scholarship.amount.toLocaleString()}/yr</span>
-                    </div>
-                    <div style="display: flex; align-items: center;">
-                        <i class="fas fa-user-graduate" style="color: #4caf50; margin-right: 8px;"></i>
-                        <span>Min Grade: ${scholarship.min_cgpa > 0 ? scholarship.min_cgpa + ' CGPA' : 'N/A'}</span>
-                    </div>
-                    <div style="display: flex; align-items: center;">
-                        <i class="fas fa-wallet" style="color: #2196f3; margin-right: 8px;"></i>
-                        <span>Max Income: ₹${scholarship.max_family_income ? scholarship.max_family_income.toLocaleString() : 'No Limit'}</span>
-                    </div>
-                     <div style="display: flex; align-items: center;">
-                        <i class="fas fa-venus-mars" style="color: #9c27b0; margin-right: 8px;"></i>
-                        <span>${scholarship.eligible_genders || 'All'}</span>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #cfd8dc; font-size: 0.85rem; color: #78909c;">
-                    <i class="fas fa-info-circle"></i> Criteria: ${scholarship.eligibility_criteria}
+            <div style="flex: 2; min-width: 300px;">
+                <h3 style="color: #1a237e; font-size: 1.3rem; margin-bottom: 8px; font-weight: 700;">${scholarship.name}</h3>
+                <p style="color: #546e7a; font-size: 0.95rem; line-height: 1.5; margin-bottom: 10px;">${scholarship.description}</p>
+                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                   <div style="background: #e8eaf6; color: #3f51b5; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">
+                        <i class="fas fa-money-bill-wave"></i> ₹${scholarship.amount.toLocaleString()}
+                   </div>
+                   <div style="background: #e0f2f1; color: #00695c; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">
+                        <i class="fas fa-users"></i> Income < ₹${scholarship.max_family_income ? scholarship.max_family_income.toLocaleString() : 'N/A'}
+                   </div>
                 </div>
             </div>
             
-            <div style="width: 200px; background: #f5f7fa; padding: 25px; display: flex; flex-direction: column; justify-content: center; align-items: center; border-left: 1px solid #eee;">
-                <div style="text-align: center; margin-bottom: 15px;">
-                    <div style="color: #78909c; font-size: 0.85rem; margin-bottom: 5px;">Application Deadline</div>
-                    <div style="color: #d32f2f; font-weight: 600;">${new Date(scholarship.deadline).toLocaleDateString()}</div>
+            <div style="flex: 1; min-width: 250px; border-left: 1px solid #eee; padding-left: 20px; display: flex; flex-direction: column; justify-content: center;">
+                <h5 style="margin: 0 0 10px 0; color: #455a64; font-size: 0.9rem;">Eligibility Snapshot</h5>
+                <div style="font-size: 0.9rem; color: #37474f; line-height: 1.4;">
+                    ${scholarship.eligibility_criteria}
                 </div>
-                
-                <a href="${scholarship.official_website}" target="_blank" style="width: 100%; text-align: center; padding: 12px; background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: 600; box-shadow: 0 4px 6px rgba(33, 150, 243, 0.3); transition: all 0.2s;">
-                    Visit Official Page <i class="fas fa-arrow-right" style="margin-left: 5px;"></i>
+            </div>
+
+            <div style="flex: 0 0 auto; min-width: 180px; text-align: right;">
+                <a href="${scholarship.official_website}" target="_blank" style="display: inline-block; padding: 12px 25px; background: #1a237e; color: white; text-decoration: none; border-radius: 50px; font-weight: 600; box-shadow: 0 4px 10px rgba(26, 35, 126, 0.2); transition: all 0.2s; white-space: nowrap;">
+                    Visit Official Site <i class="fas fa-arrow-right" style="margin-left: 5px;"></i>
                 </a>
             </div>
         `;
+
+        // Responsive adjustment script (basic)
+        // Ideally handled in CSS file but doing inline as requested for quick fix
+        if (window.innerWidth < 768) {
+            card.style.flexDirection = 'column';
+            card.style.alignItems = 'flex-start';
+        }
 
         container.appendChild(card);
     });
 }
 // Function to handle "Apply Now" (mock)
 function applyScholarship(id) {
-    alert("Application process started! You will be redirected to the application form.");
+    alert("Application process started! You will be redirected to the official application portal.");
 }
 
 // Helper to load default scholarships (optional, maybe distinct from search)
@@ -1312,7 +1293,7 @@ function generateTimetableTable(timetableData) {
     const table = document.getElementById('studentTimetable');
     if (!table) return;
 
-    const timeSlots = ['08:45-09:45', '09:45-10:45', '11:30-12:30', '12:30-13:30'];
+    const timeSlots = ['09:00-10:00', '10:00-11:00', '11:30-12:30', '12:30-13:30', '14:30-15:30', '15:30-16:30'];
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
     // Create table header
@@ -1605,4 +1586,229 @@ function updateClubRecommendations(recommendations) {
 
         container.appendChild(card);
     });
+}
+
+// --- Settings Functionality ---
+
+// Change Password
+function changePassword() {
+    const oldPassword = document.getElementById('oldPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    if (newPassword !== confirmPassword) {
+        alert("New passwords do not match!");
+        return;
+    }
+
+    fetch('/api/change-password', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            old_password: oldPassword,
+            new_password: newPassword
+        })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message);
+                document.getElementById('changePasswordForm').reset();
+            } else {
+                alert(data.message || 'Failed to change password');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while changing password');
+        });
+}
+
+// Check Password Strength and update UI
+function checkPasswordStrength() {
+    const password = document.getElementById('newPassword').value;
+    const strengthBar = document.getElementById('strengthBar');
+    const strengthLabel = document.getElementById('strengthLabel');
+
+    // Requirements
+    const lengthReq = document.getElementById('req-length');
+    const specialReq = document.getElementById('req-special');
+    const numberReq = document.getElementById('req-number');
+    const upperReq = document.getElementById('req-upper');
+
+    // Regex check
+    const hasLength = password.length >= 8;
+    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+    const hasNumber = /\d/.test(password);
+    const hasUpper = /[A-Z]/.test(password);
+
+    // Update Checklist UI
+    updateRequirement(lengthReq, hasLength);
+    updateRequirement(specialReq, hasSpecial);
+    updateRequirement(numberReq, hasNumber);
+    updateRequirement(upperReq, hasUpper);
+
+    // Calculate Strength Score (0-4)
+    let score = 0;
+    if (hasLength) score++;
+    if (hasSpecial) score++;
+    if (hasNumber) score++;
+    if (hasUpper) score++;
+
+    // Update Bar and Label
+    let width = 0;
+    let color = '#dc3545'; // Red
+    let text = 'Weak';
+
+    switch (score) {
+        case 0:
+        case 1:
+            width = 25;
+            color = '#dc3545';
+            text = 'Weak';
+            break;
+        case 2:
+            width = 50;
+            color = '#ffc107'; // Yellow
+            text = 'Fair';
+            break;
+        case 3:
+            width = 75;
+            color = '#17a2b8'; // Blue
+            text = 'Good';
+            break;
+        case 4:
+            width = 100;
+            color = '#28a745'; // Green
+            text = 'Strong';
+            break;
+    }
+
+    if (password.length === 0) {
+        width = 0;
+        text = 'Weak';
+    }
+
+    strengthBar.style.width = width + '%';
+    strengthBar.style.backgroundColor = color;
+    strengthLabel.textContent = text;
+    strengthLabel.style.color = color;
+}
+
+function updateRequirement(element, isValid) {
+    const icon = element.querySelector('i');
+    if (isValid) {
+        element.style.color = '#28a745';
+        element.style.fontWeight = '600';
+        icon.className = 'fas fa-check-circle';
+        icon.style.color = '#28a745';
+    } else {
+        element.style.color = '#666';
+        element.style.fontWeight = 'normal';
+        icon.className = 'far fa-circle';
+        icon.style.color = '#ccc';
+    }
+}
+
+// Set Theme
+function setTheme(mode) {
+    const lightBtn = document.getElementById('theme-light-btn');
+    const darkBtn = document.getElementById('theme-dark-btn');
+
+    if (mode === 'dark') {
+        document.body.classList.add('dark-mode');
+
+        // Update Buttons Visuals
+        if (lightBtn) {
+            lightBtn.classList.remove('active');
+            lightBtn.style.background = 'transparent';
+            lightBtn.style.color = '#ccc';
+            lightBtn.style.boxShadow = 'none';
+        }
+
+        if (darkBtn) {
+            darkBtn.classList.add('active');
+            darkBtn.style.background = '#2c3e50'; // Dark card-like
+            darkBtn.style.color = '#fff';
+            darkBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+        }
+
+        // Inject Styles if needed
+        injectDarkStyles();
+    } else {
+        document.body.classList.remove('dark-mode');
+
+        // Update Buttons Visuals
+        if (darkBtn) {
+            darkBtn.classList.remove('active');
+            darkBtn.style.background = 'transparent';
+            darkBtn.style.color = '#666';
+            darkBtn.style.boxShadow = 'none';
+        }
+
+        if (lightBtn) {
+            lightBtn.classList.add('active');
+            lightBtn.style.background = 'white';
+            lightBtn.style.color = '#333';
+            lightBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+        }
+    }
+}
+
+function injectDarkStyles() {
+    if (!document.getElementById('darkModeStyles')) {
+        const style = document.createElement('style');
+        style.id = 'darkModeStyles';
+        style.textContent = `
+            .dark-mode {
+                background-color: #1a1a1a;
+                color: #e0e0e0;
+            }
+            .dark-mode .sidebar {
+                background-color: #242424;
+                border-right: 1px solid #333;
+            }
+            .dark-mode .header {
+                background-color: #242424;
+                border-bottom: 1px solid #333;
+                color: #fff;
+            }
+            .dark-mode .card, .dark-mode .settings-card.premium-ui, .dark-mode .appearance-card {
+                background-color: #2d2d2d !important;
+                color: #fff;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2) !important;
+            }
+            .dark-mode .card h3, .dark-mode .card-header h3 {
+                color: #fff !important;
+            }
+            .dark-mode .appearance-label span {
+                color: #fff !important;
+            }
+            .dark-mode .appearance-label i {
+                color: #ccc !important;
+            }
+            .dark-mode input, .dark-mode select, .dark-mode textarea {
+                background-color: #383838 !important;
+                color: #fff !important;
+                border-color: #555 !important;
+            }
+            .dark-mode .theme-toggle-group {
+                background-color: #222 !important;
+            }
+            .dark-mode .password-requirements p, .dark-mode .strength-text span:first-child {
+                color: #ccc !important;
+            }
+            .dark-mode .strength-bar-bg {
+                background-color: #444 !important;
+            }
+            /* Menus and common */
+            .dark-mode .menu-item { color: #aaa; }
+            .dark-mode .menu-item:hover, .dark-mode .menu-item.active {
+                background-color: #333; color: #fff;
+            }
+        `;
+        document.head.appendChild(style);
+    }
 }
