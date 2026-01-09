@@ -203,8 +203,6 @@ class Timetable(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
     semester = db.Column(db.Integer, nullable=False)
-    division = db.Column(db.String(5))
-    batch = db.Column(db.String(10))
     day_of_week = db.Column(db.String(10), nullable=False)  # monday, tuesday, etc.
     time_slot = db.Column(db.String(20), nullable=False)  # 09:00-10:00
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
@@ -215,24 +213,6 @@ class Timetable(db.Model):
     course = db.relationship('Course', backref='timetables')
     subject = db.relationship('Subject', backref='timetable_entries')
     faculty = db.relationship('Faculty', backref='timetable_entries')
-
-class LectureSwapRequest(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    timetable_id = db.Column(db.Integer, db.ForeignKey('timetable.id'), nullable=False)
-    request_date = db.Column(db.Date, nullable=False)
-    new_faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    new_subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
-    new_room = db.Column(db.String(20))
-    is_permanent = db.Column(db.Boolean, default=False)
-    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
-    requested_by = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    reason = db.Column(db.String(200))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    timetable = db.relationship('Timetable', backref='swap_requests')
-    new_faculty = db.relationship('Faculty', foreign_keys=[new_faculty_id])
-    new_subject = db.relationship('Subject', foreign_keys=[new_subject_id])
-    requester = db.relationship('Faculty', foreign_keys=[requested_by])
 
 class StudentQuery(db.Model):
     id = db.Column(db.Integer, primary_key=True)
