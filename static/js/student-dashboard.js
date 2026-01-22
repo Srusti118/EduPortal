@@ -60,6 +60,22 @@ document.addEventListener('DOMContentLoaded', function () {
     const userData = localStorage.getItem('userData');
     if (userData) {
         currentUser = JSON.parse(userData);
+        // Put fresh data fetch here
+        fetch(`/api/get_current_user/${currentUser.id}`)
+            .then(res => res.json())
+            .then(updatedUser => {
+                if (!updatedUser.error) {
+                    currentUser = updatedUser;
+                    localStorage.setItem('userData', JSON.stringify(currentUser));
+                    loadUserData(); // Update UI with fresh data (e.g. Sem 4)
+
+                    // Reload dependent sections if needed
+                    const timetableSemester = document.getElementById('timetableSemester');
+                    if (timetableSemester) timetableSemester.textContent = currentUser.current_semester;
+                }
+            })
+            .catch(err => console.error("Failed to refresh user profile:", err));
+
         loadUserData();
     } else {
         // Redirect to login if no user data
@@ -92,6 +108,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // Load user data into the interface
+// Load user data into the interface
 function loadUserData() {
     if (currentUser) {
         document.getElementById('studentName').textContent = currentUser.full_name || 'Student';
@@ -100,6 +117,160 @@ function loadUserData() {
         document.getElementById('currentSemester').textContent = `${currentUser.current_semester || 'N/A'} Semester`;
         document.getElementById('branch').textContent = currentUser.branch || 'N/A';
     }
+}
+
+// ... (omitted shared code) ...
+
+// Load attendance data
+function loadAttendanceData() {
+    if (!currentUser) return;
+
+    fetch(`/api/student/attendance/${currentUser.student_id || currentUser.id}`) // Use student_id
+        .then(response => response.json())
+        .then(data => {
+            updateAttendanceDisplay(data);
+        })
+        .catch(error => {
+            console.error('Error loading attendance:', error);
+            // Use mock data for demo
+            const mockData = [
+                { subject_name: 'Mathematics', attendance_percentage: 90, present_classes: 27, total_classes: 30 },
+                { subject_name: 'Physics', attendance_percentage: 72, present_classes: 18, total_classes: 25 },
+                { subject_name: 'Computer Science', attendance_percentage: 88, present_classes: 22, total_classes: 25 }
+            ];
+            updateAttendanceDisplay(mockData);
+        });
+}
+
+// Load marks data
+function loadMarksData() {
+    if (!currentUser) return;
+
+    fetch(`/api/student/marks/${currentUser.student_id || currentUser.id}`)
+        .then(response => response.json())
+        .then(data => {
+            updateMarksDisplay(data);
+        })
+        .catch(error => {
+            console.error('Error loading marks:', error);
+            const mockData = [
+                { subject_name: 'Mathematics', exam_type: 'internal', marks_obtained: 85, max_marks: 100, percentage: 85 },
+                { subject_name: 'Physics', exam_type: 'internal', marks_obtained: 78, max_marks: 100, percentage: 78 },
+                { subject_name: 'Computer Science', exam_type: 'internal', marks_obtained: 92, max_marks: 100, percentage: 92 }
+            ];
+            updateMarksDisplay(mockData);
+        });
+}
+
+// Load student timetable
+async function loadStudentTimetable() {
+    if (!currentUser) return;
+
+    try {
+        const response = await fetch(`/api/student/timetable/${currentUser.student_id || currentUser.id}`);
+        const timetable = await response.json();
+
+        if (timetable.error) {
+            console.error(timetable.error);
+            return;
+        }
+
+        // Update Semester Display
+        const semesterEl = document.getElementById('timetableSemester');
+        if (semesterEl && currentUser) {
+            semesterEl.textContent = currentUser.current_semester || 'N/A';
+        }
+
+        const tbody = document.getElementById('timetable-body');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const todayIndex = new Date().getDay(); // 0=Sun, 1=Mon...
+        const dayMap = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const currentDayName = dayMap[todayIndex];
+
+        const badge = document.getElementById('current-day-badge');
+        if (badge) {
+            badge.textContent = `Today is ${currentDayName.charAt(0).toUpperCase() + currentDayName.slice(1)}`;
+        }
+
+        days.forEach(day => {
+            const row = document.createElement('tr');
+            if (day === currentDayName) {
+                row.classList.add('current-day-row');
+            }
+
+            // Day Name Cell
+            const dayCell = document.createElement('th');
+            dayCell.textContent = day.charAt(0).toUpperCase() + day.slice(1);
+            dayCell.className = "table-light";
+            row.appendChild(dayCell);
+
+            // Time Slots matching the DB/CSV (08:45 Start)
+            const slots = [
+                '08:45 AM-09:45 AM',
+                '09:45 AM-10:45 AM',
+                '11:30 AM-12:30 PM',
+                '12:30 PM-01:30 PM'
+            ];
+
+            slots.forEach(slot => {
+                const cell = document.createElement('td');
+                const entry = timetable[day] ? timetable[day][slot] : null;
+
+                if (entry) {
+                    let content = `<strong>${entry.subject_name}</strong><br>
+                                 <small>${entry.faculty_name}</small><br>
+                                 <span class="badge bg-secondary">${entry.room_number || 'Room TBD'}</span>`;
+
+                    if (entry.status === 'rescheduled') {
+                        cell.classList.add('rescheduled-slot');
+                        content = `<span class="badge bg-danger rescheduled-badge">Changed</span><br>` + content;
+                    }
+
+                    cell.innerHTML = content;
+                } else {
+                    cell.innerHTML = '<span class="text-muted">-</span>';
+                }
+                row.appendChild(cell);
+            });
+
+            tbody.appendChild(row);
+        });
+
+    } catch (error) {
+        console.error('Error loading timetable:', error);
+    }
+}
+
+// Load fee details
+function loadFeeDetails() {
+    if (!currentUser) return;
+
+    fetch(`/api/fee/details/${currentUser.student_id || currentUser.id}`) // Use student_id
+        .then(response => response.json())
+        .then(data => {
+            updateFeeDisplay(data);
+        })
+        .catch(error => {
+            console.error('Error loading fee details:', error);
+        });
+}
+
+// Load queries
+function loadQueries() {
+    if (!currentUser) return;
+
+    fetch(`/api/queries?student_id=${currentUser.student_id || currentUser.id}`) // Use student_id
+        .then(response => response.json())
+        .then(data => {
+            updateQueriesDisplay(data);
+        })
+        .catch(error => {
+            console.error('Error loading queries:', error);
+        });
 }
 
 // Show specific section
@@ -161,13 +332,13 @@ function showSection(sectionId) {
             loadFeeDetails();
             break;
         case 'queries':
-            loadAcademicQueries();
+            loadQueries();
             break;
         case 'idcard':
             loadStudentIdCard();
             break;
         case 'clubs':
-            loadAllClubs();
+            loadStudentClubs();
             break;
         case 'timetable':
             loadStudentTimetable();
@@ -225,26 +396,8 @@ function initializeCharts() {
     }
 }
 
-// Load attendance data
-function loadAttendanceData() {
-    if (!currentUser) return;
-
-    fetch(`/api/student/attendance/${currentUser.id}`)
-        .then(response => response.json())
-        .then(data => {
-            updateAttendanceDisplay(data);
-        })
-        .catch(error => {
-            console.error('Error loading attendance:', error);
-            // Use mock data for demo
-            const mockData = [
-                { subject_name: 'Mathematics', attendance_percentage: 90, present_classes: 27, total_classes: 30 },
-                { subject_name: 'Physics', attendance_percentage: 72, present_classes: 18, total_classes: 25 },
-                { subject_name: 'Computer Science', attendance_percentage: 88, present_classes: 22, total_classes: 25 }
-            ];
-            updateAttendanceDisplay(mockData);
-        });
-}
+// Duplicate loadAttendanceData removed
+// See lines 125+ for correct version
 
 // Update attendance display
 function updateAttendanceDisplay(attendanceData) {
@@ -274,26 +427,8 @@ function updateAttendanceDisplay(attendanceData) {
     });
 }
 
-// Load marks data
-function loadMarksData() {
-    if (!currentUser) return;
-
-    fetch(`/api/student/marks/${currentUser.id}`)
-        .then(response => response.json())
-        .then(data => {
-            updateMarksDisplay(data);
-        })
-        .catch(error => {
-            console.error('Error loading marks:', error);
-            // Use mock data for demo
-            const mockData = [
-                { subject_name: 'Mathematics', exam_type: 'internal', marks_obtained: 85, max_marks: 100, percentage: 85 },
-                { subject_name: 'Physics', exam_type: 'internal', marks_obtained: 78, max_marks: 100, percentage: 78 },
-                { subject_name: 'Computer Science', exam_type: 'internal', marks_obtained: 92, max_marks: 100, percentage: 92 }
-            ];
-            updateMarksDisplay(mockData);
-        });
-}
+// Duplicate loadMarksData removed
+// See lines 139+ for correct version
 
 // Update marks display
 function updateMarksDisplay(marksData) {
@@ -580,19 +715,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-// Load queries
-function loadQueries() {
-    if (!currentUser) return;
-
-    fetch(`/api/queries?student_id=${currentUser.id}`)
-        .then(response => response.json())
-        .then(data => {
-            updateQueriesDisplay(data);
-        })
-        .catch(error => {
-            console.error('Error loading queries:', error);
-        });
-}
+// Duplicate loadQueries removed
+// See lines 180+ for correct version
 
 // Update queries display
 function updateQueriesDisplay(queries) {
@@ -700,19 +824,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-// Load fee details
-function loadFeeDetails() {
-    if (!currentUser) return;
-
-    fetch(`/api/fee/details/${currentUser.id}`)
-        .then(response => response.json())
-        .then(data => {
-            updateFeeDisplay(data);
-        })
-        .catch(error => {
-            console.error('Error loading fee details:', error);
-        });
-}
+// Duplicate loadFeeDetails removed
+// See lines 166+ for correct version
 
 // Update fee display
 function updateFeeDisplay(feeData) {
@@ -1246,52 +1359,66 @@ function downloadMarksheet() {
     // In real implementation, this would generate and download a PDF
 }
 
+// Check for login
+currentUser = JSON.parse(localStorage.getItem('userData'));
+if (!currentUser) {
+    console.error("No user data found in localStorage. Redirecting to login.");
+    // alert("Session expired or invalid. Please login again."); 
+    window.location.href = '/';
+} else {
+    console.log("Logged in as:", currentUser.full_name);
+}
+
 // Logout function
 function logout() {
     localStorage.removeItem('userData');
     window.location.href = '/';
 }
 
-// Load all clubs
-function loadAllClubs() {
+// Load Clubs
+function loadStudentClubs() {
     fetch('/api/clubs')
         .then(response => response.json())
-        .then(data => {
-            updateAllClubsDisplay(data);
+        .then(clubs => {
+            const container = document.getElementById('allClubsGrid');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            if (clubs.length === 0) {
+                container.innerHTML = '<div class="no-data">No clubs active at the moment.</div>';
+                return;
+            }
+
+            clubs.forEach(club => {
+                const card = document.createElement('div');
+                card.className = 'club-card';
+                card.innerHTML = `
+                    <div class="club-header">
+                        <h3>${club.name}</h3>
+                        <span class="club-category tag-${club.category}">${club.category}</span>
+                    </div>
+                    <div class="club-body">
+                        <p>${club.description}</p>
+                        <div class="club-meta">
+                            <span><i class="fas fa-calendar-alt"></i> ${club.meeting_schedule}</span>
+                        </div>
+                    </div>
+                    <div class="club-footer">
+                        ${club.instagram_link ?
+                        `<a href="${club.instagram_link}" target="_blank" class="instagram-btn">
+                             <i class="fab fa-instagram"></i> Instagram
+                           </a>` : ''}
+                        
+                        <button onclick="registerForClub(${club.id}, '${club.name}')" class="register-btn">
+                            Register
+                        </button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
         })
-        .catch(error => {
-            console.error('Error loading clubs:', error);
-        });
-}
-
-// Update all clubs display
-function updateAllClubsDisplay(clubs) {
-    const container = document.getElementById('allClubsGrid');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    clubs.forEach(club => {
-        const clubCard = document.createElement('div');
-        clubCard.className = `club-card ${club.category}`;
-
-        clubCard.innerHTML = `
-            <div class="club-header">
-                <h4>${club.name}</h4>
-                <span class="club-category ${club.category}">${club.category.toUpperCase()}</span>
-            </div>
-            <p class="club-description">${club.description}</p>
-            <div class="club-details">
-                <p><strong>Coordinator:</strong> ${club.faculty_coordinator || 'N/A'}</p>
-                <p><strong>Student Lead:</strong> ${club.student_coordinator}</p>
-                <p><strong>Meeting:</strong> ${club.meeting_schedule}</p>
-                <p><strong>Contact:</strong> ${club.contact_email}</p>
-            </div>
-            <button onclick="joinClub(${club.id})" class="join-club-btn">Join Club</button>
-        `;
-
-        container.appendChild(clubCard);
-    });
+        .catch(error => console.error('Error loading clubs:', error));
 }
 
 // Open interest survey
@@ -1317,13 +1444,38 @@ function showClubTab(tabName) {
     event.target.classList.add('active');
 
     if (tabName === 'all') {
-        loadAllClubs();
+        loadStudentClubs();
     }
 }
 
-// Join club
-function joinClub(clubId) {
-    alert(`Club joining functionality for club ${clubId} would be implemented here.`);
+// Register for Club
+function registerForClub(clubId, clubName) {
+    if (!currentUser) return;
+
+    if (!confirm(`Do you want to send a registration request to ${clubName}?`)) return;
+
+    fetch('/api/student/club/register', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            student_id: currentUser.student_id || currentUser.id,
+            club_id: clubId
+        })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(`Request sent! The faculty coordinator will review your application for ${clubName}.`);
+            } else {
+                alert(data.error || 'Failed to register');
+            }
+        })
+        .catch(error => {
+            console.error('Error registering:', error);
+            alert('An error occurred. Please try again.');
+        });
 }
 
 // Load student timetable
@@ -1341,17 +1493,28 @@ function loadStudentTimetable() {
 }
 
 // Generate timetable table
+// Generate timetable table
 function generateTimetableTable(timetableData) {
     const table = document.getElementById('studentTimetable');
     if (!table) return;
 
-    const timeSlots = ['09:00-10:00', '10:00-11:00', '11:30-12:30', '12:30-13:30', '14:30-15:30', '15:30-16:30'];
+    // Time slots from the CSV data
+    const timeSlots = [
+        '08:45 AM-09:45 AM',
+        '09:45 AM-10:45 AM',
+        '11:30 AM-12:30 PM',
+        '12:30 PM-01:30 PM'
+    ];
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+    // Get current day name
+    const currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
 
     // Create table header
     let headerHTML = '<thead><tr><th>Time</th>';
     days.forEach(day => {
-        headerHTML += `<th>${day.charAt(0).toUpperCase() + day.slice(1)}</th>`;
+        const isCurrent = day === currentDay ? 'current-day-header' : '';
+        headerHTML += `<th class="${isCurrent}">${day.charAt(0).toUpperCase() + day.slice(1)}</th>`;
     });
     headerHTML += '</tr></thead>';
 
@@ -1360,18 +1523,22 @@ function generateTimetableTable(timetableData) {
     timeSlots.forEach(timeSlot => {
         bodyHTML += `<tr><td class="time-slot">${timeSlot}</td>`;
         days.forEach(day => {
+            const isCurrent = day === currentDay ? 'current-day-column' : '';
             const classInfo = timetableData[day] && timetableData[day][timeSlot];
+
             if (classInfo) {
                 bodyHTML += `
-                    <td class="class-cell ${classInfo.subject_code.toLowerCase()}">
-                        <div class="subject-name">${classInfo.subject_name}</div>
-                        <div class="subject-code">${classInfo.subject_code}</div>
-                        <div class="faculty-name">${classInfo.faculty_name}</div>
-                        <div class="room-number">${classInfo.room_number}</div>
+                    <td class="class-cell ${isCurrent}">
+                        <div class="class-card">
+                            <div class="subject-name">${classInfo.subject_name}</div>
+                            <div class="room-number"><i class="fas fa-map-marker-alt"></i> ${classInfo.room_number || 'N/A'}</div>
+                            <div class="faculty-name"><i class="fas fa-user-tie"></i> ${classInfo.faculty_name}</div>
+                            <div class="subject-code">${classInfo.subject_code}</div>
+                        </div>
                     </td>
                 `;
             } else {
-                bodyHTML += '<td class="empty-cell">-</td>';
+                bodyHTML += `<td class="empty-cell ${isCurrent}">-</td>`;
             }
         });
         bodyHTML += '</tr>';
@@ -1764,6 +1931,56 @@ function updateRequirement(element, isValid) {
     }
 }
 
+// Load student ID card
+function loadStudentIdCard() {
+    if (!currentUser) return;
+
+    fetch(`/api/student/id-card/${currentUser.student_id || currentUser.id}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error(data.error);
+                return;
+            }
+
+            // Populate ID Card Fields
+            document.getElementById('cardName').textContent = data.full_name;
+            document.getElementById('cardBranch').textContent = data.branch;
+            document.getElementById('cardEnrollment').textContent = data.enrollment_number;
+            document.getElementById('cardRoll').textContent = data.roll_number;
+            document.getElementById('cardSemester').textContent = "Sem " + data.semester;
+            document.getElementById('cardYear').textContent = data.admission_year;
+            document.getElementById('cardEmergency').textContent = data.emergency_contact || 'N/A';
+            document.getElementById('cardValidity').textContent = data.valid_until;
+
+            if (data.photo_url) {
+                document.getElementById('cardPhoto').src = data.photo_url;
+            }
+
+            // Generate QR Code with Student Info
+            const qrData = `ID:${data.enrollment_number}|Name:${data.full_name}`;
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrData)}`;
+            const qrImg = document.querySelector('.qr-placeholder img');
+            if (qrImg) qrImg.src = qrUrl;
+        })
+        .catch(error => console.error('Error loading ID card:', error));
+}
+
+// Print ID Card
+function printIdCard() {
+    const printContent = document.getElementById('printableIdCard').outerHTML;
+    const win = window.open('', '', 'height=600,width=800');
+    win.document.write('<html><head><title>Student ID Card</title>');
+    // Include styles for printing
+    win.document.write('<link rel="stylesheet" href="/static/css/dashboard.css">');
+    win.document.write('<style>body { display: flex; justify-content: center; align-items: center; height: 100vh; background: #fff; } .id-card-container { box-shadow: none; border: 1px solid #ddd; }</style>');
+    win.document.write('</head><body>');
+    win.document.write(printContent);
+    win.document.write('</body></html>');
+    win.document.close();
+    win.print();
+}
+
 // Set Theme
 function setTheme(mode) {
     const lightBtn = document.getElementById('theme-light-btn');
@@ -1865,81 +2082,5 @@ function injectDarkStyles() {
     }
 }
 
-// Load student timetable
-async function loadStudentTimetable() {
-    if (!currentUser) return;
-
-    try {
-        const response = await fetch(`/api/student/timetable/${currentUser.id}`);
-        const timetable = await response.json();
-
-        if (timetable.error) {
-            console.error(timetable.error);
-            return;
-        }
-
-        const tbody = document.getElementById('timetable-body');
-        if (!tbody) return;
-
-        tbody.innerHTML = '';
-
-        const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-        const todayIndex = new Date().getDay(); // 0=Sun, 1=Mon...
-        const dayMap = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-        const currentDayName = dayMap[todayIndex];
-
-        const badge = document.getElementById('current-day-badge');
-        if (badge) {
-            badge.textContent = `Today is ${currentDayName.charAt(0).toUpperCase() + currentDayName.slice(1)}`;
-        }
-
-        days.forEach(day => {
-            const row = document.createElement('tr');
-            if (day === currentDayName) {
-                row.classList.add('current-day-row');
-            }
-
-            // Day Name Cell
-            const dayCell = document.createElement('th');
-            dayCell.textContent = day.charAt(0).toUpperCase() + day.slice(1);
-            dayCell.className = "table-light";
-            row.appendChild(dayCell);
-
-            // Time Slots matching the HTML headers
-            const slots = [
-                '09:00-10:00',
-                '10:00-11:00',
-                '11:30-12:30',
-                '12:30-01:30',
-                '02:15-03:15',
-                '03:15-04:15'
-            ];
-
-            slots.forEach(slot => {
-                const cell = document.createElement('td');
-                const entry = timetable[day] ? timetable[day][slot] : null;
-
-                if (entry) {
-                    let content = `<strong>${entry.subject_name}</strong><br>
-                                 <small>${entry.faculty_name}</small><br>
-                                 <span class="badge bg-secondary">${entry.room_number || 'Room TBD'}</span>`;
-
-                    if (entry.status === 'rescheduled') {
-                        cell.classList.add('rescheduled-slot');
-                        content = `<span class="badge bg-danger rescheduled-badge">Changed</span><br>` + content;
-                    }
-
-                    cell.innerHTML = content;
-                } else {
-                    cell.innerHTML = '<span class="text-muted">-</span>';
-                }
-                row.appendChild(cell);
-            });
-
-            tbody.appendChild(row);
-        });
-
-    } catch (error) {
-        console.error('Error loading timetable:', error);
-    }
-}
+// Duplicate loadStudentTimetable removed
+// See lines 153+ for correct version

@@ -188,9 +188,20 @@ class Club(db.Model):
     student_coordinator = db.Column(db.String(100))
     meeting_schedule = db.Column(db.String(200))
     contact_email = db.Column(db.String(100))
+    instagram_link = db.Column(db.String(500))
     is_active = db.Column(db.Boolean, default=True)
     
     coordinator = db.relationship('Faculty', backref='coordinated_clubs')
+
+class ClubRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
+    club_id = db.Column(db.Integer, db.ForeignKey('club.id'), nullable=False)
+    status = db.Column(db.String(20), default='pending') # pending, approved, rejected
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    student = db.relationship('Student', backref='club_requests')
+    club = db.relationship('Club', backref='requests')
 
 class Timetable(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -202,6 +213,8 @@ class Timetable(db.Model):
     faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
     room_number = db.Column(db.String(20))
     academic_year = db.Column(db.String(10), nullable=False)
+    division = db.Column(db.String(5))
+    batch = db.Column(db.String(10))
     
     course = db.relationship('Course', backref='timetables')
     subject = db.relationship('Subject', backref='timetable_entries')
@@ -278,3 +291,18 @@ class Mentorship(db.Model):
     
     faculty = db.relationship('Faculty', backref='mentees')
     student = db.relationship('Student', backref='mentors')
+
+class LectureSwapRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    requesting_faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
+    target_faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id')) # Can be null if open request
+    timetable_id = db.Column(db.Integer, db.ForeignKey('timetable.id'), nullable=False)
+    date = db.Column(db.Date) # Date of the lecture to be swapped (if temporary)
+    status = db.Column(db.String(20), default='pending') # pending, approved, rejected
+    reason = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_temporary = db.Column(db.Boolean, default=True)
+    
+    requesting_faculty = db.relationship('Faculty', foreign_keys=[requesting_faculty_id], backref='sent_swap_requests')
+    target_faculty = db.relationship('Faculty', foreign_keys=[target_faculty_id], backref='received_swap_requests')
+    timetable_entry = db.relationship('Timetable', backref='swap_requests')

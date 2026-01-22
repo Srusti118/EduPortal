@@ -665,25 +665,28 @@ async function loadFacultyTimetable() {
         tbody.innerHTML = '';
 
         const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
 
         days.forEach(day => {
             const row = document.createElement('tr');
+            if (day === currentDay) {
+                row.classList.add('current-day-row'); // Add highlight class
+                row.style.border = "2px solid #ffc107"; // Fallback/Direct style for visibility
+            }
 
             // Day Name Cell
             const dayCell = document.createElement('th');
             dayCell.textContent = day.charAt(0).toUpperCase() + day.slice(1);
-            dayCell.className = "table-light";
+            dayCell.className = day === currentDay ? "table-warning" : "table-light"; // Bootstrap 'table-warning' is yellow-ish
             row.appendChild(dayCell);
 
             // Time Slots matching the HTML headers
             const slots = [
-                '09:00-10:00',
-                '10:00-11:00',
-                '11:30-12:30',
-                '12:30-01:30',
-                '02:15-03:15',
-                '03:15-04:15'
-            ];
+                '08:45 AM-09:45 AM',
+                '09:45 AM-10:45 AM',
+                '11:30 AM-12:30 PM',
+                '12:30 PM-01:30 PM'
+            ]; // Updated to match CSV/App logic
 
             slots.forEach(slot => {
                 const cell = document.createElement('td');
@@ -692,12 +695,15 @@ async function loadFacultyTimetable() {
                 if (entry) {
                     let content = `<strong>${entry.subject_name}</strong><br>
                                  <small>${entry.course_name} (Div ${entry.division || 'All'})</small><br>
+                                 <span class="badge bg-info text-dark" style="font-size: 0.8em;">Batch: ${entry.batch}</span><br>
                                  <span class="badge bg-secondary">${entry.room_number || 'Room TBD'}</span><br>
                                  <button class="btn btn-sm btn-outline-primary mt-1" onclick="openSwapModal(${entry.original_id}, '${entry.subject_name}', '${day}', '${slot}')" style="font-size: 0.7rem; padding: 2px 5px;">Manage</button>`;
 
                     cell.innerHTML = content;
+                    if (day === currentDay) cell.classList.add('table-warning');
                 } else {
                     cell.innerHTML = '<span class="text-muted">-</span>';
+                    if (day === currentDay) cell.classList.add('table-warning');
                 }
                 row.appendChild(cell);
             });

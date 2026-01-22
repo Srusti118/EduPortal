@@ -17,7 +17,7 @@ from models import (
     User, Student, Faculty, Course, Subject, SubjectAssignment, Attendance,
     Marks, Notice, StudyMaterial, FeeStructure, FeePayment, Event, Club,
     Timetable, StudentQuery, QueryResponse, Scholarship, ScholarshipApplication,
-    Notification, Mentorship
+    Notification, Mentorship, ClubRequest
 )
 
 # Routes
@@ -36,6 +36,34 @@ def faculty_dashboard():
 @app.route('/admin-dashboard')
 def admin_dashboard():
     return render_template('admin-dashboard.html')
+
+@app.route('/api/get_current_user/<int:user_id>')
+def get_current_user(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+        
+    user_data = {
+        'id': user.id,
+        'username': user.username,
+        'full_name': user.full_name,
+        'role': user.role,
+        'department': user.department
+    }
+    
+    if user.role == 'student':
+        student = Student.query.filter_by(user_id=user.id).first()
+        if student:
+            user_data.update({
+                'student_id': student.id,
+                'roll_number': student.roll_number,
+                'enrollment_number': student.enrollment_number,
+                'current_semester': student.current_semester,
+                'branch': student.branch,
+                'cgpa': student.cgpa
+            })
+            
+    return jsonify(user_data)
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -63,6 +91,7 @@ def login():
             student = Student.query.filter_by(user_id=user.id).first()
             if student:
                 user_data.update({
+                    'student_id': student.id,
                     'roll_number': student.roll_number,
                     'enrollment_number': student.enrollment_number,
                     'current_semester': student.current_semester,
@@ -226,10 +255,57 @@ def get_clubs():
             'faculty_coordinator': club.coordinator.user.full_name if club.coordinator else None,
             'student_coordinator': club.student_coordinator,
             'meeting_schedule': club.meeting_schedule,
-            'contact_email': club.contact_email
+            'student_coordinator': club.student_coordinator,
+            'meeting_schedule': club.meeting_schedule,
+            'contact_email': club.contact_email,
+            'instagram_link': club.instagram_link
         })
     
     return jsonify(clubs_data)
+
+@app.route('/api/student/club/register', methods=['POST'])
+def register_club():
+    data = request.json
+    student_id = data.get('student_id')
+    club_id = data.get('club_id')
+    
+    if not student_id or not club_id:
+        return jsonify({'error': 'Missing student_id or club_id'}), 400
+        
+    # Check if already registered
+    existing_request = ClubRequest.query.filter_by(student_id=student_id, club_id=club_id).first()
+    if existing_request:
+        return jsonify({'error': 'Request already exists', 'status': existing_request.status}), 400
+        
+    club = Club.query.get(club_id)
+    student = Student.query.get(student_id)
+    
+    if not club or not student:
+        return jsonify({'error': 'Club or Student not found'}), 404
+        
+    # Create Request
+    new_request = ClubRequest(
+        student_id=student_id,
+        club_id=club_id,
+        status='pending'
+    )
+    db.session.add(new_request)
+    
+    # Notify Faculty Coordinator (or Default ClubHead if none)
+    coordinator_user_id = club.coordinator.user_id if club.coordinator else None
+    
+    if coordinator_user_id:
+        notification = Notification(
+            user_id=coordinator_user_id,
+            title=f"New Club Registration: {club.name}",
+            message=f"Student {student.user.full_name} ({student.roll_number}) has requested to join {club.name}.",
+            notification_type='club_request'
+        )
+        db.session.add(notification)
+    
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': 'Registration requested successfully'})
 
 @app.route('/api/student/club-recommendations', methods=['POST'])
 def get_club_recommendations():
@@ -270,10 +346,30 @@ def get_student_timetable(student_id):
         return jsonify({'error': 'Student not found'}), 404
     
     # Get timetable for student's course and semester
-    timetable_entries = Timetable.query.join(Course).filter(
-        Course.course_name == student.branch,
-        Timetable.semester == student.current_semester
-    ).all()
+    # Get timetable for student's course and semester
+    # Filter by division and batch if applicable
+    # Filter by academic year
+    current_academic_year = '2025-26'
+    
+    query = Timetable.query.join(Course).filter(
+        (Course.course_name == student.branch) | (Course.course_code == student.branch),
+        Timetable.semester == student.current_semester,
+        Timetable.academic_year == current_academic_year
+    )
+    
+    # Filter by division if student has one
+    if student.division:
+        query = query.filter(
+            (Timetable.division == student.division) | (Timetable.division == None)
+        )
+        
+    # Filter by batch if student has one (include full class lectures which have no batch)
+    if student.batch:
+         query = query.filter(
+            (Timetable.batch == student.batch) | (Timetable.batch == None)
+        )
+        
+    timetable_entries = query.all()
     
     # Organize by day and time
     timetable = {}
@@ -289,7 +385,7 @@ def get_student_timetable(student_id):
         timetable[day][time_slot] = {
             'subject_name': entry.subject.subject_name,
             'subject_code': entry.subject.subject_code,
-            'faculty_name': entry.faculty.user.full_name,
+            'faculty_name': entry.faculty.faculty_id,
             'room_number': entry.room_number
         }
     
@@ -446,6 +542,93 @@ def get_notices():
         })
     
     return jsonify(notices_data)
+
+@app.route('/api/faculty/timetable/<int:user_id>')
+def get_faculty_timetable(user_id):
+    # If user_id is the User ID (login ID), we need to find the Faculty ID
+    faculty = Faculty.query.filter_by(user_id=user_id).first()
+    if not faculty:
+        # Fallback: maybe the ID passed is actually the Faculty table ID
+        faculty = Faculty.query.get(user_id)
+        if not faculty:
+            return jsonify({'error': 'Faculty not found'}), 404
+
+    # Fetch timetable for this faculty
+    current_academic_year = '2025-26'
+    
+    entries = Timetable.query.join(Subject).join(Course).filter(
+        Timetable.faculty_id == faculty.id,
+        Timetable.academic_year == current_academic_year
+    ).all()
+    
+    # Organize by day and time
+    timetable = {}
+    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    
+    for day in days:
+        timetable[day] = {}
+        
+    for entry in entries:
+        day = entry.day_of_week.lower()
+        time_slot = entry.time_slot
+        
+        timetable[day][time_slot] = {
+            'original_id': entry.id,
+            'subject_name': entry.subject.subject_name,
+            'subject_code': entry.subject.subject_code,
+            'course_name': entry.course.course_name, # or course_code
+            'division': entry.division if entry.division else 'All',
+            'batch': entry.batch,
+            'room_number': entry.room_number,
+            'semester': entry.semester
+        }
+        
+    return jsonify(timetable)
+
+@app.route('/api/faculty/timetable/change', methods=['POST'])
+def request_lecture_swap():
+    data = request.json
+    try:
+        timetable_id = data.get('timetable_id')
+        new_faculty_id = data.get('new_faculty_id') # This might be the faculty_id string (e.g. 'AKS') or DB ID
+        change_type = data.get('change_type') # 'temporary' or 'permanent'
+        reason = data.get('reason')
+        date_str = data.get('date') # YYYY-MM-DD, relevant for temporary
+        
+        timetable_entry = Timetable.query.get(timetable_id)
+        if not timetable_entry:
+            return jsonify({'success': False, 'error': 'Timetable entry not found'}), 404
+
+        # Resolve Target Faculty
+        target_faculty = None
+        if new_faculty_id:
+            # Try to find by DB ID first
+            target_faculty = Faculty.query.get(new_faculty_id) 
+            if not target_faculty:
+                 # Try by Faculty Code string
+                 target_faculty = Faculty.query.filter_by(faculty_id=new_faculty_id).first()
+        
+        # Create Request
+        from models import LectureSwapRequest
+        
+        swap_request = LectureSwapRequest(
+            requesting_faculty_id=timetable_entry.faculty_id,
+            target_faculty_id=target_faculty.id if target_faculty else None,
+            timetable_id=timetable_id,
+            status='pending',
+            reason=reason,
+            is_temporary=(change_type == 'temporary'),
+            date=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else None
+        )
+        
+        db.session.add(swap_request)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Swap request submitted successfully'})
+
+    except Exception as e:
+        print(f"Error submitting swap: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/faculty/classes/<int:faculty_id>')
 def get_faculty_classes(faculty_id):
@@ -748,6 +931,10 @@ def init_db():
                 add_column_if_not_exists('scholarship', 'max_family_income', 'FLOAT DEFAULT 0.0')
                 add_column_if_not_exists('scholarship', 'eligible_categories', 'VARCHAR(200)')
                 add_column_if_not_exists('scholarship', 'eligible_genders', 'VARCHAR(50)')
+
+                # Migration for Timetable table
+                add_column_if_not_exists('timetable', 'division', 'VARCHAR(5)')
+                add_column_if_not_exists('timetable', 'batch', 'VARCHAR(10)')
 
         except Exception as e:
              print(f"Migration error: {e}")
