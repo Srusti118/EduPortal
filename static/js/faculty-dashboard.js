@@ -1,4 +1,28 @@
 // Global variables
+// --- Auth Token Injection (Multi-Tab Support) ---
+const originalFetch = window.fetch;
+window.fetch = function (url, options) {
+    options = options || {};
+    options.headers = options.headers || {};
+
+    // Inject Token
+    const userDataStr = sessionStorage.getItem('userData');
+    if (userDataStr) {
+        try {
+            const userData = JSON.parse(userDataStr);
+            if (userData.token) {
+                if (options.headers instanceof Headers) {
+                    options.headers.append('X-Auth-Token', userData.token);
+                } else {
+                    options.headers['X-Auth-Token'] = userData.token;
+                }
+            }
+        } catch (e) { console.error("Auth Token Error", e); }
+    }
+    return originalFetch(url, options);
+};
+// ------------------------------------------------
+
 let currentUser = null;
 let currentClass = null;
 let studentsData = [];
@@ -57,8 +81,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // Load user data from localStorage
-    const userData = localStorage.getItem('userData');
+    // Load user data from sessionStorage (Tab Specific)
+    const userData = sessionStorage.getItem('userData');
     if (userData) {
         currentUser = JSON.parse(userData);
         loadUserData();
@@ -72,7 +96,7 @@ document.addEventListener('DOMContentLoaded', function () {
     setInterval(updateDateTime, 1000);
 
     // Load initial data
-    loadFacultyClasses();
+    // loadFacultyClasses(); // Removed (SubjectAssignment deleted)
     loadTodaySchedule();
 });
 
@@ -134,6 +158,9 @@ function showSection(sectionId) {
             break;
         case 'timetable':
             loadFacultyTimetable();
+            break;
+        case 'queries':
+            loadFacultyQueries();
             break;
     }
 }
@@ -572,7 +599,8 @@ function chatWithMentee(studentId) {
 
 // Logout function
 function logout() {
-    localStorage.removeItem('userData');
+    sessionStorage.removeItem('userData');
+    localStorage.removeItem('userData'); // Clear legacy just in case
     window.location.href = '/';
 }
 
@@ -807,3 +835,190 @@ function submitSwapRequest() {
             alert('Error submitting request.');
         });
 }
+
+// --- Faculty Query Management ---
+
+let currentFacultyQueries = [];
+let activeFacultyThreadId = null;
+
+function loadFacultyQueries() {
+    if (!currentUser) return;
+
+    const container = document.getElementById('facultyQueryList');
+    if (container) container.innerHTML = '<div class="text-center p-5 text-muted"><i class="fas fa-spinner fa-spin"></i> Loading queries...</div>';
+
+    // We use currentUser.id (User Table ID) as updated in app.py logic
+    fetch(`/api/queries/faculty/${currentUser.id}`)
+        .then(res => res.json())
+        .then(data => {
+            currentFacultyQueries = data;
+            filterFacultyQueries();
+        })
+        .catch(err => {
+            console.error(err);
+            if (container) container.innerHTML = '<div class="text-center p-5 text-danger">Failed to load queries.</div>';
+        });
+}
+
+function filterFacultyQueries() {
+    const filterEl = document.getElementById('queryStatusFilter');
+    const container = document.getElementById('facultyQueryList');
+    if (!container) return;
+
+    const filter = filterEl ? filterEl.value : 'pending';
+
+    let filtered = currentFacultyQueries;
+    if (filter !== 'all') {
+        filtered = currentFacultyQueries.filter(q => q.status === filter);
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="text-center p-5 text-muted">No queries found.</div>';
+        return;
+    }
+
+    container.innerHTML = '';
+    filtered.forEach(q => {
+        const card = document.createElement('div');
+        card.className = 'query-card';
+        card.style.cssText = "background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #eee; cursor: pointer; transition: transform 0.2s; border-left: 4px solid " + getStatusColor(q.status);
+
+        // Context Info
+        const studentInfo = `<strong>${q.student_name}</strong> (${q.student_roll})`;
+        const metaInfo = `Subject: ${q.subject || 'N/A'}`;
+
+        // Type Badge
+        const typeBadge = q.type === 'mentorship'
+            ? '<span style="background-color: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-right: 6px; font-weight: bold;">MENTOR</span>'
+            : '<span style="background-color: #17a2b8; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-right: 6px; font-weight: bold;">ACADEMIC</span>';
+
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between;">
+                <h4 style="margin: 0; font-size: 1.1rem; color: #333; display: flex; align-items: center;">${typeBadge} <span>${q.title}</span></h4>
+                <span class="badge" style="background:${getStatusColor(q.status)}; color:white; padding:4px 8px; border-radius:12px; font-size:0.8rem;">${q.status.toUpperCase()}</span>
+            </div>
+            <div style="margin-top: 8px; font-size: 0.9rem; color: #555;">
+                ${studentInfo}
+            </div>
+            <div style="margin-top: 5px; font-size: 0.85rem; color: #888;">
+                ${metaInfo} • Updated: ${q.updated_at}
+            </div>
+            <div style="margin-top: 10px; font-size: 0.95rem; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                ${q.last_message || 'No messages yet.'}
+            </div>
+        `;
+
+        card.onclick = () => openFacultyReplyModal(q.id);
+        container.appendChild(card);
+    });
+}
+
+function getStatusColor(status) {
+    if (status === 'pending') return '#dc3545';
+    if (status === 'answered') return '#198754';
+    if (status === 'clarification') return '#ffc107';
+    if (status === 'resolved') return '#6c757d';
+    return '#0d6efd';
+}
+
+function openFacultyReplyModal(threadId) {
+    activeFacultyThreadId = threadId;
+    const modal = document.getElementById('facultyReplyModal');
+    const msgContainer = document.getElementById('replyThreadMessages');
+
+    if (modal) modal.style.display = 'block';
+    if (msgContainer) msgContainer.innerHTML = '<div class="text-center p-3">Loading messages...</div>';
+
+    fetch(`/api/queries/thread/${threadId}`)
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('replyStudentName').textContent = data.student_details?.full_name || 'Student';
+            document.getElementById('replyStudentRoll').textContent = `Roll: ${data.student_details?.roll_number || '--'}`;
+            document.getElementById('replyStudentBranch').textContent = `Branch: ${data.student_details?.branch || '--'}`;
+
+            document.getElementById('replyQueryTitle').textContent = data.title;
+            const statusBadge = document.getElementById('replyQueryStatus');
+            statusBadge.textContent = data.status.toUpperCase();
+            statusBadge.style.backgroundColor = getStatusColor(data.status);
+            statusBadge.style.color = 'white';
+
+            const statusSelect = document.getElementById('replyStatusAction');
+            if (statusSelect) statusSelect.value = 'answered';
+
+            if (msgContainer) {
+                msgContainer.innerHTML = '';
+                if (!data.posts || data.posts.length === 0) {
+                    msgContainer.innerHTML = '<p class="text-center text-muted">No messages.</p>';
+                } else {
+                    data.posts.forEach(post => {
+                        const isMe = post.role === 'faculty';
+                        const div = document.createElement('div');
+                        div.style.cssText = `display: flex; flex-direction: column; align-items: ${isMe ? 'flex-end' : 'flex-start'}; margin-bottom: 15px;`;
+
+                        div.innerHTML = `
+                            <div style="background: ${isMe ? '#e9ecef' : '#e3f2fd'}; color: #333; padding: 10px 15px; border-radius: 15px; border-${isMe ? 'bottom-right' : 'bottom-left'}-radius: 0; max-width: 80%;">
+                                <div style="font-weight: 600; font-size: 0.8rem; margin-bottom: 4px; color: ${isMe ? '#495057' : '#0d6efd'};">
+                                    ${post.author_name} <span style="font-weight: normal; color: #888;">• ${post.role.toUpperCase()}</span>
+                                </div>
+                                <div style="white-space: pre-wrap;">${post.content}</div>
+                                <div style="font-size: 0.75rem; color: #999; text-align: right; margin-top: 5px;">${post.created_at}</div>
+                            </div>
+                        `;
+                        msgContainer.appendChild(div);
+                    });
+                    msgContainer.scrollTop = msgContainer.scrollHeight;
+                }
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            if (msgContainer) msgContainer.innerHTML = '<div class="text-danger">Failed to load thread.</div>';
+        });
+}
+
+function closeFacultyReplyModal() {
+    const modal = document.getElementById('facultyReplyModal');
+    if (modal) modal.style.display = 'none';
+    activeFacultyThreadId = null;
+    document.getElementById('facultyReplyForm').reset();
+}
+
+// Bind Reply Form
+// Bind Reply Form
+document.addEventListener('DOMContentLoaded', function () {
+    const replyForm = document.getElementById('facultyReplyForm');
+    if (replyForm) {
+        replyForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (!activeFacultyThreadId) return;
+
+            const content = document.getElementById('replyContent').value;
+            const statusAction = document.getElementById('replyStatusAction').value;
+            const fileInput = document.getElementById('facultyReplyFile');
+            const file = fileInput ? fileInput.files[0] : null;
+
+            const formData = new FormData();
+            formData.append('user_id', currentUser.id);
+            formData.append('role', 'faculty');
+            formData.append('content', content);
+            formData.append('status', statusAction);
+            if (file) {
+                formData.append('file', file);
+            }
+
+            fetch(`/api/queries/${activeFacultyThreadId}/reply`, {
+                method: 'POST',
+                body: formData
+            }).then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Reply sent!');
+                        closeFacultyReplyModal();
+                        loadFacultyQueries();
+                    } else {
+                        alert('Failed to send reply');
+                    }
+                });
+        });
+    }
+});

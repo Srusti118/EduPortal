@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 import os
 from extensions import db
@@ -14,11 +15,9 @@ db.init_app(app)
 
 # Database Models moved to models.py
 from models import (
-    User, Student, Faculty, Course, Subject, SubjectAssignment, Attendance,
-    Marks, Notice, StudyMaterial, FeeStructure, FeePayment, Event, Club,
-    Timetable, StudentQuery, QueryResponse, Scholarship, ScholarshipApplication,
-    Timetable, StudentQuery, QueryResponse, Scholarship, ScholarshipApplication,
-    Notification, Mentorship
+    User, Student, Faculty, Course, Club, ClubRequest,
+    Timetable, Scholarship, Notification,
+    ExamSchedule, Exam, QueryThread, QueryPost, QueryAttachment
 )
 from timetable_model import ClassSchedule
 
@@ -61,11 +60,31 @@ def get_current_user(user_id):
                 'roll_number': student.roll_number,
                 'enrollment_number': student.enrollment_number,
                 'current_semester': student.current_semester,
-                'branch': student.branch,
-                'cgpa': student.cgpa
+                'branch': student.branch
             })
             
     return jsonify(user_data)
+
+from flask import g
+from itsdangerous import URLSafeTimedSerializer
+
+# Add to global config or near top
+s = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+
+def get_current_user_id():
+    return g.get('user_id') or session.get('user_id')
+
+@app.before_request
+def load_user_from_token():
+    token = request.headers.get('X-Auth-Token')
+    if token:
+        try:
+            data = s.loads(token, max_age=86400) # Valid for 1 day
+            g.user_id = data['user_id']
+            g.role = data['role']
+        except:
+            # Invalid token, ignore (will rely on session or fail)
+            pass
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -77,8 +96,12 @@ def login():
     user = User.query.filter_by(username=username, role=role).first()
     
     if user and check_password_hash(user.password_hash, password):
+        # Cookie Session (Legacy/Fallback)
         session['user_id'] = user.id
         session['role'] = user.role
+        
+        # Token Session (Multi-Tab Isolation)
+        token = s.dumps({'user_id': user.id, 'role': user.role})
         
         # Get additional user data based on role
         user_data = {
@@ -86,7 +109,8 @@ def login():
             'username': user.username,
             'full_name': user.full_name,
             'role': user.role,
-            'department': user.department
+            'department': user.department,
+            'token': token # valid for session storage
         }
         
         if user.role == 'student':
@@ -99,127 +123,31 @@ def login():
                     'current_semester': student.current_semester,
                     'branch': student.branch,
                     'batch': student.batch,
-                    'cgpa': student.cgpa
+                    'mentor': student.mentor
                 })
+                
         elif user.role == 'faculty':
             faculty = Faculty.query.filter_by(user_id=user.id).first()
             if faculty:
                 user_data.update({
                     'faculty_id': faculty.faculty_id,
-                    'designation': faculty.designation,
-                    'experience_years': faculty.experience_years,
-                    'specialization': faculty.specialization
+                    'faculty_table_id': faculty.id,
+                    'assigned_subjects': faculty.assigned_subjects
                 })
         
         return jsonify({'success': True, 'user': user_data})
-    else:
-        return jsonify({'success': False, 'message': 'Invalid credentials'})
+    
+    return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
-@app.route('/api/events')
-def get_events():
-    events = Event.query.filter(Event.is_active == True).order_by(Event.start_date.desc()).all()
-    
-    events_data = []
-    for event in events:
-        events_data.append({
-            'id': event.id,
-            'title': event.title,
-            'description': event.description,
-            'event_type': event.event_type,
-            'start_date': event.start_date.isoformat(),
-            'end_date': event.end_date.isoformat(),
-            'venue': event.venue,
-            'organizer_name': event.organizer_name,
-            'contact_person': event.contact_person,
-            'contact_phone': event.contact_phone,
-            'contact_email': event.contact_email,
-            'registration_required': event.registration_required,
-            'registration_deadline': event.registration_deadline.isoformat() if event.registration_deadline else None,
-            'max_participants': event.max_participants
-        })
-    
-    return jsonify(events_data)
 
-@app.route('/api/student/fee-history/<int:student_id>')
-def get_fee_history(student_id):
-    payments = FeePayment.query.filter_by(student_id=student_id).order_by(FeePayment.payment_date.desc()).all()
-    
-    fee_history = []
-    for payment in payments:
-        fee_structure = payment.fee_structure
-        fee_history.append({
-            'id': payment.id,
-            'semester': fee_structure.semester,
-            'academic_year': fee_structure.academic_year,
-            'amount_paid': payment.amount_paid,
-            'payment_date': payment.payment_date.isoformat(),
-            'payment_method': payment.payment_method,
-            'transaction_id': payment.transaction_id,
-            'status': payment.status,
-            'tuition_fee': fee_structure.tuition_fee,
-            'lab_fee': fee_structure.lab_fee,
-            'library_fee': fee_structure.library_fee,
-            'other_fees': fee_structure.other_fees,
-            'total_fee': fee_structure.total_fee
-        })
-    
-    return jsonify(fee_history)
+# Events route removed
 
-@app.route('/api/student/queries', methods=['GET', 'POST'])
-def handle_student_queries():
-    if request.method == 'POST':
-        data = request.get_json()
-        
-        query = StudentQuery(
-            student_id=data.get('student_id'),
-            faculty_id=data.get('faculty_id'),
-            subject_id=data.get('subject_id'),
-            query_title=data.get('query_title'),
-            query_description=data.get('query_description'),
-            attachment_url=data.get('attachment_url')
-        )
-        
-        db.session.add(query)
-        
-        # Create notification for faculty
-        faculty = Faculty.query.get(data.get('faculty_id'))
-        if faculty:
-            notification = Notification(
-                user_id=faculty.user_id,
-                title='New Student Query',
-                message=f'New query: {data.get("query_title")}',
-                notification_type='query'
-            )
-            db.session.add(notification)
-        
-        db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'Query submitted successfully'})
-    
-    else:
-        student_id = request.args.get('student_id')
-        queries = StudentQuery.query.filter_by(student_id=student_id).order_by(StudentQuery.created_at.desc()).all()
-        
-        queries_data = []
-        for query in queries:
-            queries_data.append({
-                'id': query.id,
-                'query_title': query.query_title,
-                'query_description': query.query_description,
-                'subject_name': query.subject.subject_name,
-                'faculty_name': query.faculty.user.full_name,
-                'status': query.status,
-                'created_at': query.created_at.isoformat(),
-                'answered_at': query.answered_at.isoformat() if query.answered_at else None,
-                'responses': [
-                    {
-                        'response_text': resp.response_text,
-                        'created_at': resp.created_at.isoformat()
-                    } for resp in query.responses
-                ]
-            })
-        
-        return jsonify(queries_data)
+
+# Fee History route removed
+
+
+# Student Queries route removed
+
 
 @app.route('/api/student/id-card/<int:student_id>')
 def get_student_id_card(student_id):
@@ -238,11 +166,11 @@ def get_student_id_card(student_id):
         'branch': student.branch,
         'semester': student.current_semester,
         'admission_year': student.admission_year,
-        'photo_url': student.photo_url or 'https://via.placeholder.com/150x180',
-        'blood_group': student.blood_group,
-        'emergency_contact': student.emergency_contact,
-        'address': student.address,
-        'gender': student.gender,
+        'photo_url': 'https://via.placeholder.com/150x180', # Default
+        'blood_group': 'N/A',
+        'emergency_contact': 'N/A',
+        'address': 'N/A',
+        'gender': 'N/A',
         'valid_until': f"{student.admission_year + 4}-12-31"
     }
     
@@ -336,7 +264,8 @@ def get_club_recommendations():
                     'description': club.description,
                     'category': club.category,
                     'faculty_coordinator': club.coordinator.user.full_name if club.coordinator else None,
-                    'contact_email': club.contact_email
+                    'contact_email': club.contact_email,
+                    'instagram_link': club.instagram_link
                 },
                 'match_score': match_score,
                 'matching_interests': list(set(student_interests) & set(club_interests))
@@ -347,35 +276,45 @@ def get_club_recommendations():
     
     return jsonify(recommendations)
 
-@app.route('/api/student/timetable/<int:user_id>')
-def get_student_timetable(user_id):
-    student = Student.query.filter_by(user_id=user_id).first()
+@app.route('/api/student/timetable/<int:id_param>')
+def get_student_timetable(id_param):
+    # Try finding by Student ID (primary key) first (likely what frontend sends)
+    student = Student.query.get(id_param)
+    if not student:
+        # Fallback: Try finding by User ID
+        student = Student.query.filter_by(user_id=id_param).first()
+        
     if not student or not student.batch:
         return jsonify([])
     
     current_academic_year = '2025-26'
     
-    # Query the Relational Timetable Model
-    schedule = Timetable.query.join(Subject).filter(
+    # Query the Relational Timetable Model directly (Subject table removed)
+    schedule = Timetable.query.filter(
         Timetable.batch == student.batch,
         Timetable.academic_year == current_academic_year
-    ).order_by(Timetable.id).all() # Sorting by ID or add custom day order
+    ).order_by(Timetable.id).all()
     
-    # Custom sort for days
-    day_order = {'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6}
-    
-    # Sort in python as 'day_order' might not be in Timetable model
-    schedule.sort(key=lambda x: day_order.get(x.day_of_week.capitalize(), 7))
+    # Map short days to full days
+    day_map = {
+        'MON': 'Monday', 'TUE': 'Tuesday', 'WED': 'Wednesday', 
+        'THU': 'Thursday', 'FRI': 'Friday', 'SAT': 'Saturday',
+        'SUN': 'Sunday'
+    }
 
     result = []
     for entry in schedule:
+        # Normalize day name
+        raw_day = entry.day_of_week.upper() # e.g. MON
+        full_day = day_map.get(raw_day, entry.day_of_week.capitalize())
+        
         result.append({
-            'day': entry.day_of_week.capitalize(),
+            'day': full_day,
             'time': entry.time_slot,
-            'subject': entry.subject.subject_name,
-            'faculty': entry.faculty.user.full_name if (entry.faculty and entry.faculty.user) else "Faculty",
+            'subject': entry.subject_raw, # Used raw column
+            'faculty': entry.faculty_raw, # Used raw column (or join Faculty if needed, but raw is safer if links broken)
             'room': entry.room_number,
-            'type': "Lecture" # Default or add to model if needed
+            'type': "Lecture"
         })
     return jsonify(result)
 
@@ -450,88 +389,14 @@ def get_eligible_scholarships():
     
     return jsonify(eligible_scholarships)
 
-@app.route('/api/student/attendance/<int:student_id>')
-def get_student_attendance(student_id):
-    # Calculate attendance for each subject
-    subjects = Subject.query.join(Course).filter(Course.department == 'Computer Science').all()
-    attendance_data = []
-    
-    for subject in subjects:
-        total_classes = Attendance.query.filter_by(
-            student_id=student_id, 
-            subject_id=subject.id
-        ).count()
-        
-        present_classes = Attendance.query.filter_by(
-            student_id=student_id, 
-            subject_id=subject.id, 
-            status='present'
-        ).count()
-        
-        attendance_percentage = (present_classes / total_classes * 100) if total_classes > 0 else 0
-        
-        attendance_data.append({
-            'subject_name': subject.subject_name,
-            'attendance_percentage': round(attendance_percentage, 2),
-            'present_classes': present_classes,
-            'total_classes': total_classes
-        })
-    
-    return jsonify(attendance_data)
+# Attendance route removed (Subject table deleted)
 
-@app.route('/api/student/marks/<int:student_id>')
-def get_student_marks(student_id):
-    marks = db.session.query(Marks, Subject).join(Subject).filter(
-        Marks.student_id == student_id
-    ).all()
-    
-    marks_data = []
-    for mark, subject in marks:
-        marks_data.append({
-            'subject_name': subject.subject_name,
-            'exam_type': mark.exam_type,
-            'marks_obtained': mark.marks_obtained,
-            'max_marks': mark.max_marks,
-            'percentage': round((mark.marks_obtained / mark.max_marks) * 100, 2),
-            'exam_date': mark.exam_date.isoformat() if mark.exam_date else None,
-            'semester': mark.semester
-        })
-    
-    return jsonify(marks_data)
 
-@app.route('/api/notices')
-def get_notices():
-    role = request.args.get('role', 'all')
-    department = request.args.get('department')
-    
-    query = Notice.query.filter(Notice.is_active == True)
-    
-    if role != 'all':
-        query = query.filter(
-            (Notice.target_audience == 'all') | 
-            (Notice.target_audience == role)
-        )
-    
-    if department:
-        query = query.filter(
-            (Notice.target_audience != 'department') |
-            (Notice.department == department)
-        )
-    
-    notices = query.order_by(Notice.created_at.desc()).all()
-    
-    notices_data = []
-    for notice in notices:
-        notices_data.append({
-            'id': notice.id,
-            'title': notice.title,
-            'content': notice.content,
-            'notice_type': notice.notice_type,
-            'created_at': notice.created_at.isoformat(),
-            'expires_at': notice.expires_at.isoformat() if notice.expires_at else None
-        })
-    
-    return jsonify(notices_data)
+# Marks route removed
+
+
+# Notices route removed
+
 
 @app.route('/api/student/memberships/<int:student_id>')
 def get_student_memberships(student_id):
@@ -551,37 +416,54 @@ def get_student_memberships(student_id):
             })
     return jsonify(result)
 
-@app.route('/api/faculty/timetable/<int:user_id>')
-def get_faculty_timetable(user_id):
-    # If user_id is the User ID (login ID), we need to find the Faculty ID
-    faculty = Faculty.query.filter_by(user_id=user_id).first()
+@app.route('/api/faculty/timetable/<int:id_param>')
+def get_faculty_timetable(id_param):
+    # Try finding by Faculty ID (primary key) first
+    faculty = Faculty.query.get(id_param)
     if not faculty:
-        # Fallback: maybe the ID passed is actually the Faculty table ID
-        faculty = Faculty.query.get(user_id)
-        if not faculty:
-            return jsonify({'error': 'Faculty not found'}), 404
+        # Fallback: Try finding by User ID
+        faculty = Faculty.query.filter_by(user_id=id_param).first()
+        
+    if not faculty:
+        return jsonify({'error': 'Faculty not found'}), 404
 
     # Fetch timetable for this faculty
+    # Fetch timetable for this faculty (using raw name match or explicit ID if kept? 
+    # We removed faculty_id column from Timetable in prev step? No, we kept it? 
+    # Let's check models.py... "faculty_id = db.Column... nullable=True" WAS REMOVED.
+    # So we must match by faculty_raw
+    
+    # We need the faculty's initials/name to match faculty_raw
+    # Faculty table has faculty_id (e.g. MGV). Timetable has faculty_raw (e.g. MGV).
+    
     current_academic_year = '2025-26'
     
-    entries = Timetable.query.join(Subject).join(Course).filter(
-        Timetable.faculty_id == faculty.id,
+    # Match by initials (faculty_id column in Faculty table stores initials like MGV)
+    entries = Timetable.query.filter(
+        Timetable.faculty_raw == faculty.faculty_id, 
         Timetable.academic_year == current_academic_year
     ).all()
     
-    # Organize by day and time - Modified to return List for frontend compatibility
+    # Organize by day and time
     timetable = []
     
+    # Map short days to full days
+    day_map = {
+        'MON': 'Monday', 'TUE': 'Tuesday', 'WED': 'Wednesday', 
+        'THU': 'Thursday', 'FRI': 'Friday', 'SAT': 'Saturday',
+        'SUN': 'Sunday'
+    }
+    
     for entry in entries:
-        # Ensure day is Capitalized (Monday, Tuesday...) for frontend matching
-        day_str = entry.day_of_week.capitalize()
+        raw_day = entry.day_of_week.upper()
+        full_day = day_map.get(raw_day, entry.day_of_week.capitalize())
         
         timetable.append({
-            'day': day_str,
+            'day': full_day,
             'time': entry.time_slot,
-            'subject': entry.subject.subject_name,
-            'subject_code': entry.subject.subject_code,
-            'course': entry.course.course_name,
+            'subject': entry.subject_raw,
+            'subject_code': '', # Not available
+            'course': 'N/A', # Not available
             'division': entry.division if entry.division else 'All',
             'batch': entry.batch,
             'room': entry.room_number,
@@ -592,81 +474,14 @@ def get_faculty_timetable(user_id):
         
     return jsonify(timetable)
 
-@app.route('/api/faculty/timetable/change', methods=['POST'])
-def request_lecture_swap():
-    data = request.json
-    try:
-        timetable_id = data.get('timetable_id')
-        new_faculty_id = data.get('new_faculty_id') # This might be the faculty_id string (e.g. 'AKS') or DB ID
-        change_type = data.get('change_type') # 'temporary' or 'permanent'
-        reason = data.get('reason')
-        date_str = data.get('date') # YYYY-MM-DD, relevant for temporary
-        
-        timetable_entry = Timetable.query.get(timetable_id)
-        if not timetable_entry:
-            return jsonify({'success': False, 'error': 'Timetable entry not found'}), 404
+# Lecture Swap route removed
 
-        # Resolve Target Faculty
-        target_faculty = None
-        if new_faculty_id:
-            # Try to find by DB ID first
-            target_faculty = Faculty.query.get(new_faculty_id) 
-            if not target_faculty:
-                 # Try by Faculty Code string
-                 target_faculty = Faculty.query.filter_by(faculty_id=new_faculty_id).first()
-        
-        # Create Request
-        from models import LectureSwapRequest
-        
-        swap_request = LectureSwapRequest(
-            requesting_faculty_id=timetable_entry.faculty_id,
-            target_faculty_id=target_faculty.id if target_faculty else None,
-            timetable_id=timetable_id,
-            status='pending',
-            reason=reason,
-            is_temporary=(change_type == 'temporary'),
-            date=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else None
-        )
-        
-        db.session.add(swap_request)
-        db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'Swap request submitted successfully'})
 
-    except Exception as e:
-        print(f"Error submitting swap: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/faculty/classes/<int:faculty_id>')
-def get_faculty_classes(faculty_id):
-    assignments = db.session.query(SubjectAssignment, Subject, Course).join(
-        Subject
-    ).join(Course).filter(
-        SubjectAssignment.faculty_id == faculty_id
-    ).all()
-    
-    classes_data = []
-    for assignment, subject, course in assignments:
-        # Get student count for this subject
-        student_count = db.session.query(Student).join(Course).filter(
-            Course.id == course.id
-        ).count()
-        
-        classes_data.append({
-            'subject_name': subject.subject_name,
-            'subject_code': subject.subject_code,
-            'course_name': course.course_name,
-            'semester': assignment.semester,
-            'student_count': student_count,
-            'credits': subject.credits
-        })
-    
-    return jsonify(classes_data)
 
-    # Sort by match score descending
-    recommendations.sort(key=lambda x: x['match_score'], reverse=True)
-    
-    return jsonify(recommendations)
+
+
+
 
 @app.route('/api/student/club-recommendations', methods=['POST'])
 def recommend_clubs():
@@ -1545,6 +1360,154 @@ def init_db():
             db.session.commit()
             print("Authentic scholarships added.")
 
+# --- Examination Management APIs ---
+
+@app.route('/api/admin/exams/schedule', methods=['POST'])
+def create_exam_schedule():
+    if 'user_id' not in session or session.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    data = request.get_json()
+    try:
+        new_schedule = ExamSchedule(
+            name=data['name'],
+            academic_year=data['academic_year'],
+            semester_type=data.get('semester_type'),
+            start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
+            end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+        )
+        db.session.add(new_schedule)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Exam schedule created', 'id': new_schedule.id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/exams/timetable', methods=['POST'])
+def add_exam_timetable_entry():
+    if 'user_id' not in session or session.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    data = request.get_json()
+    try:
+        new_exam = Exam(
+            exam_schedule_id=data['exam_schedule_id'],
+            subject_id=data['subject_id'],
+            # faculty_id=data.get('faculty_id'), # Optional
+            exam_date=datetime.strptime(data['exam_date'], '%Y-%m-%d').date(),
+            start_time=datetime.strptime(data['start_time'], '%H:%M').time(),
+            end_time=datetime.strptime(data['end_time'], '%H:%M').time(),
+            room_number=data.get('room_number')
+        )
+        db.session.add(new_exam)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Timetable entry added'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error adding exam: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/exams/timetable/<int:schedule_id>')
+def get_exam_timetable(schedule_id):
+    exams = Exam.query.filter_by(exam_schedule_id=schedule_id).all()
+    result = []
+    for exam in exams:
+        result.append({
+            'id': exam.id,
+            'subject_name': exam.subject.subject_name,
+            'subject_code': exam.subject.subject_code,
+            'exam_date': exam.exam_date.strftime('%Y-%m-%d'),
+            'start_time': exam.start_time.strftime('%H:%M'),
+            'end_time': exam.end_time.strftime('%H:%M'),
+            'room_number': exam.room_number,
+            'faculty_name': exam.faculty.user.full_name if exam.faculty else 'TBA'
+        })
+    return jsonify(result)
+
+@app.route('/api/admin/exams/publish/<int:schedule_id>', methods=['POST'])
+def publish_exam_schedule(schedule_id):
+    if 'user_id' not in session or session.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    schedule = ExamSchedule.query.get(schedule_id)
+    if not schedule:
+        return jsonify({'error': 'Schedule not found'}), 404
+        
+    schedule.is_published = True
+    
+    # Notify all students
+    students = Student.query.filter_by(function=1).all()
+    for student in students:
+        notif = Notification(
+            user_id=student.user_id,
+            title='Exam Schedule Released',
+            message=f'The schedule for {schedule.name} has been published.',
+            notification_type='exam'
+        )
+        db.session.add(notif)
+        
+    db.session.commit()
+    return jsonify({'success': True, 'message': 'Schedule published and students notified'})
+
+@app.route('/api/admin/exams/subjects')
+def get_all_subjects_for_exams():
+    subjects = Subject.query.all()
+    return jsonify([{
+        'id': s.id, 
+        'code': s.subject_code, 
+        'name': s.subject_name
+    } for s in subjects])
+
+@app.route('/api/student/exams')
+def get_student_exams():
+    if 'user_id' not in session or session.get('role') != 'student':
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    user = User.query.get(session['user_id'])
+    student = user.student
+
+    # Find the latest published active schedule
+    # For simplicity, getting the most recent published one
+    schedule = ExamSchedule.query.filter_by(is_published=True).order_by(ExamSchedule.created_at.desc()).first()
+    
+    if not schedule:
+        return jsonify([])
+
+    # In a real app, filter by student's semester/branch
+    # For now, return all exams in this schedule that match student's subjects (if enrolled)
+    # Or just return all exams for the demo if subject enrollment isn't strict
+    
+    exams = Exam.query.filter_by(exam_schedule_id=schedule.id).order_by(Exam.exam_date).all()
+    
+    exam_data = []
+    for exam in exams:
+        # Determine Status
+        now = datetime.now()
+        exam_dt = datetime.combine(exam.exam_date, exam.start_time)
+        end_dt = datetime.combine(exam.exam_date, exam.end_time)
+        
+        status = 'Upcoming'
+        status_class = 'upcoming'
+        
+        if now > end_dt:
+            status = 'Completed'
+            status_class = 'completed'
+        elif now >= exam_dt and now <= end_dt:
+            status = 'Ongoing'
+            status_class = 'ongoing'
+            
+        exam_data.append({
+            'subject_name': exam.subject.subject_name,
+            'subject_code': exam.subject.subject_code,
+            'date': exam.exam_date.strftime('%d %b %Y'),
+            'day': exam.exam_date.strftime('%A'),
+            'time': f"{exam.start_time.strftime('%I:%M %p')} - {exam.end_time.strftime('%I:%M %p')}",
+            'room': exam.room_number,
+            'status': status,
+            'status_class': status_class
+        })
+        
+    return jsonify(exam_data)
+
 if __name__ == '__main__':
     # Initialize main DB
     with app.app_context():
@@ -1555,14 +1518,309 @@ if __name__ == '__main__':
     
     # Register Admin Blueprint
     # Import here to avoid circular dependencies
-    try:
-        from admin import admin_exam_bp, init_exam_db
-        app.register_blueprint(admin_exam_bp)
-        print("Registered Admin Examination Blueprint")
-        
-        # Initialize Exam DB tables
-        init_exam_db(app)
-    except Exception as e:
-        print(f"Error registering Admin Blueprint: {e}")
+    # try:
+    #     from admin import admin_exam_bp, init_exam_db
+    #     app.register_blueprint(admin_exam_bp)
+    #     print("Registered Admin Examination Blueprint")
+    #     
+    #     # Initialize Exam DB tables
+    #     # init_exam_db(app)
+    # except Exception as e:
+    #     print(f"Error registering Admin Blueprint: {e}")
 
+
+
+# --- Enhanced Query Resolution System Routes ---
+
+@app.route('/api/faculty/by-subject')
+def get_faculty_by_subject():
+    subject = request.args.get('subject')
+    if not subject:
+        return jsonify([])
+    
+    # Filter faculty whose assigned_subjects string contains the subject
+    # This is a naive substring match; consistent with typical requirements here
+    faculty_list = Faculty.query.filter(Faculty.assigned_subjects.contains(subject)).all()
+    
+    result = []
+    for f in faculty_list:
+        result.append({
+            'id': f.id,
+            'name': f.user.full_name
+        })
+    return jsonify(result)
+
+@app.route('/api/queries/create', methods=['POST'])
+def create_query():
+    data = request.json
+    try:
+        student_id = data.get('student_id')
+        title = data.get('title')
+        content = data.get('content')
+        query_type = data.get('query_type', 'academic') # 'academic' or 'mentorship'
+        
+        # Details dependent on type
+        subject_name = data.get('subject_name')
+        faculty_id = data.get('faculty_id') 
+
+        student = Student.query.get(student_id)
+        if not student:
+             # Fallback: Check if the ID provided is actually the User ID
+             student = Student.query.filter_by(user_id=student_id).first()
+             
+             if not student:
+                 return jsonify({'error': 'Student not found'}), 404
+
+        # Logic Branch
+        if query_type == 'mentorship':
+            subject_name = 'Mentorship' # Placeholder
+            # Auto-assign to mentor
+            mentor_name = student.mentor
+            if not mentor_name:
+                return jsonify({'error': 'No mentor assigned to your profile.'}), 400
+                
+            # Find Faculty User by Name (Case Insensitive Partial Match)
+            # We assume Mentor Name matches a User.full_name who is a Faculty
+            mentor_user = User.query.filter(User.full_name.ilike(f"%{mentor_name}%"), User.role=='faculty').first()
+            if mentor_user and mentor_user.faculty:
+                faculty_id = mentor_user.faculty.id
+            else:
+                 # Fallback: Check if there is ANY faculty (Demo purposes: assign to first faculty)
+                 # In production, this should flag an admin
+                 fallback_faculty = Faculty.query.first()
+                 if fallback_faculty:
+                     faculty_id = fallback_faculty.id
+                 # Fallback: leave unassigned if mentor not found in system
+                 pass
+
+        else:
+            # Academic
+            if not subject_name:
+                return jsonify({'error': 'Subject is required for academic queries'}), 400
+            
+            # Auto-assign logic if no faculty selected
+            if not faculty_id:
+                 potential_faculty = Faculty.query.filter(Faculty.assigned_subjects.contains(subject_name)).first()
+                 if potential_faculty:
+                     faculty_id = potential_faculty.id
+        
+        # Create Thread
+        thread = QueryThread(
+            student_id=student.id, # Ensure we use the correct Student ID (PK)
+            faculty_id=faculty_id,
+            subject_name=subject_name,
+            title=title,
+            status='pending',
+            query_type=query_type
+        )
+        db.session.add(thread)
+        db.session.flush()
+
+        # Create First Post
+        post = QueryPost(
+            thread_id=thread.id,
+            author_user_id=student.user_id,
+            role='student',
+            content=content
+        )
+        db.session.add(post)
+        
+        # Notification
+        if faculty_id:
+            faculty = Faculty.query.get(faculty_id)
+            if faculty:
+                notif = Notification(
+                    user_id=faculty.user_id,
+                    title=f"New {query_type.capitalize()} Query",
+                    message=f"New query from {student.user.full_name}: {title}",
+                    notification_type="query"
+                )
+                db.session.add(notif)
+        
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Query submitted', 'thread_id': thread.id})
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating query: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/queries/student/<int:student_id>')
+def get_student_queries(student_id):
+    threads = QueryThread.query.filter_by(student_id=student_id).order_by(QueryThread.updated_at.desc()).all()
+    
+    result = []
+    for t in threads:
+        result.append({
+            'id': t.id,
+            'title': t.title,
+            'subject': t.subject_name,
+            'status': t.status,
+            'type': t.query_type, # Return type
+            'faculty_name': t.faculty.user.full_name if t.faculty else "Unassigned",
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'last_message': t.posts[-1].content[:50] + "..." if t.posts else ""
+        })
+    return jsonify(result)
+
+@app.route('/api/queries/faculty/<int:user_id>')
+def get_faculty_queries(user_id):
+    # Lookup Faculty by User ID
+    faculty = Faculty.query.filter_by(user_id=user_id).first()
+    if not faculty:
+        return jsonify([])
+        
+    # Fetch threads assigned to this faculty
+    threads = QueryThread.query.filter_by(faculty_id=faculty.id).order_by(
+        # Prioritize Pending
+        (QueryThread.status == 'pending').desc(),
+        QueryThread.updated_at.desc()
+    ).all()
+    
+    result = []
+    for t in threads:
+        student = t.student
+        result.append({
+            'id': t.id,
+            'title': t.title,
+            'subject': t.subject_name,
+            'status': t.status,
+            'type': t.query_type,
+            'student_name': student.user.full_name,
+            'student_roll': student.roll_number,
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'last_message': t.posts[-1].content[:50] + "..." if t.posts else ""
+        })
+    return jsonify(result)
+
+@app.route('/api/queries/thread/<int:thread_id>')
+def get_query_thread_details(thread_id):
+    thread = QueryThread.query.get(thread_id)
+    if not thread:
+        return jsonify({'error': 'Thread not found'}), 404
+        
+    posts_data = []
+    for p in thread.posts:
+        posts_data.append({
+            'id': p.id,
+            'author_name': p.author.full_name,
+            'role': p.role,
+            'content': p.content,
+            'created_at': p.created_at.strftime('%Y-%m-%d %H:%M')
+        })
+        
+    # Enhanced Context for Faculty
+    student_details = None
+    # We always send it, Frontend decides to show it based on current user role (which frontend knows)
+    # Or strict: Only if current user is faculty. 
+    # For simplicity/speed in this context, we send it.
+    std = thread.student
+    student_details = {
+        'full_name': std.user.full_name,
+        'enrollment': std.enrollment_number,
+        'roll_number': std.roll_number,
+        'branch': std.branch,
+        'semester': std.current_semester
+    }
+        
+    return jsonify({
+        'id': thread.id,
+        'title': thread.title,
+        'subject': thread.subject_name,
+        'status': thread.status,
+        'type': getattr(thread, 'query_type', 'academic'),
+        'faculty_id': thread.faculty_id,
+        'faculty_name': thread.faculty.user.full_name if thread.faculty else "Unassigned",
+        'posts': posts_data,
+        'student_details': student_details
+    })
+
+@app.route('/api/queries/<int:thread_id>/reply', methods=['POST'])
+def reply_to_query(thread_id):
+    # Handle both JSON and Form Data
+    if request.is_json:
+        data = request.json
+        user_id = data.get('user_id')
+        role = data.get('role')
+        content = data.get('content')
+        status = data.get('status')
+    else:
+        # Form Data for File Upload
+        data = request.form
+        user_id = data.get('user_id')
+        role = data.get('role')
+        content = data.get('content')
+        status = data.get('status')
+    
+    thread = QueryThread.query.get(thread_id)
+    if not thread:
+        return jsonify({'error': 'Thread not found'}), 404
+        
+    post = QueryPost(
+        thread_id=thread.id,
+        author_user_id=user_id,
+        role=role,
+        content=content
+    )
+    db.session.add(post)
+    db.session.flush() # Get post ID
+    
+    # Handle File Upload
+    file = request.files.get('file') if not request.is_json else None
+    if file:
+        filename = secure_filename(file.filename)
+        # Ensure directory exists
+        upload_dir = os.path.join(app.root_path, 'static/uploads/queries')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        save_name = f"{timestamp}_{filename}"
+        file.save(os.path.join(upload_dir, save_name))
+        
+        attachment = QueryAttachment(
+            post_id=post.id,
+            file_url=f"/static/uploads/queries/{save_name}",
+            file_type=filename.split('.')[-1],
+            file_name=filename
+        )
+        db.session.add(attachment)
+    
+    thread.updated_at = datetime.utcnow()
+    if role == 'faculty':
+        thread.status = status if status else 'answered'
+        notif = Notification(
+            user_id=thread.student.user_id,
+            title="Query Update",
+            message=f"Faculty replied to: {thread.title}",
+            notification_type="query"
+        )
+        db.session.add(notif)
+        
+    elif role == 'student' and thread.status == 'answered':
+         thread.status = 'clarification'
+    
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/queries/<int:thread_id>/resolve', methods=['POST'])
+def resolve_query(thread_id):
+    thread = QueryThread.query.get(thread_id)
+    if not thread:
+        return jsonify({'error': 'Thread not found'}), 404
+    thread.status = 'resolved'
+    thread.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/common/subjects')
+def get_common_subjects():
+    try:
+        subjects = db.session.query(Timetable.subject_raw).distinct().all()
+        subject_list = [s[0] for s in subjects if s[0]]
+        return jsonify(sorted(subject_list))
+    except:
+        return jsonify([])
+
+
+if __name__ == '__main__':
     app.run(debug=True, port=5001)

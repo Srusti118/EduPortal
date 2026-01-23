@@ -47,8 +47,8 @@
                 <li><a href="#queries" class="menu-item" onclick="showSection('queries')">
                         <i class="fas fa-question-circle"></i> Queries
                     </a></li>
-                <li><a href="#examination" class="menu-item" onclick="showSection('examination')">
-                        <i class="fas fa-clipboard-list"></i> Examination
+                <li><a href="#exams" class="menu-item" onclick="showSection('exams')">
+                        <i class="fas fa-edit"></i> Examinations
                     </a></li>
                 <li><a href="#clubs" class="menu-item" onclick="showSection('clubs')">
                         <i class="fas fa-users"></i> Clubs
@@ -325,7 +325,8 @@
                         <i class="fas fa-info-circle"></i>
                         <div>
                             <h5>How to Access Notes</h5>
-                            <p>Click on any subject folder above to access the complete collection of notes, assignments, and resources stored in Google Drive.</p>
+                            <p>Click on any subject folder above to access the complete collection of notes,
+                                assignments, and resources stored in Google Drive.</p>
                         </div>
                     </div>
                 </div>
@@ -391,30 +392,67 @@
             <section id="queries" class="content-section">
                 <div class="section-header">
                     <h2>Academic Queries</h2>
-                    <button onclick="openAcademicQueryModal()" class="add-btn">
+                    <button onclick="openCreateQueryModal()" class="add-btn">
                         <i class="fas fa-plus"></i> Ask Faculty
                     </button>
                 </div>
+
+                <!-- Query Tabs -->
+                <div class="query-tabs" style="margin-bottom: 20px;">
+                    <button class="tab-btn active" onclick="filterQueries('all')">All</button>
+                    <button class="tab-btn" onclick="filterQueries('pending')">Pending</button>
+                    <button class="tab-btn" onclick="filterQueries('answered')">Answered</button>
+                    <button class="tab-btn" onclick="filterQueries('resolved')">Resolved</button>
+                </div>
+
                 <div class="queries-container">
-                    <div class="query-stats">
-                        <div class="stat-item">
-                            <span class="stat-number" id="totalQueries">0</span>
-                            <span class="stat-label">Total Queries</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-number" id="pendingQueries">0</span>
-                            <span class="stat-label">Pending</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-number" id="answeredQueries">0</span>
-                            <span class="stat-label">Answered</span>
-                        </div>
-                    </div>
                     <div class="queries-list" id="academicQueriesList">
-                        <!-- Academic queries will be loaded here -->
+                        <!-- Query Cards loaded here -->
+                        <div class="text-center p-4">Loading queries...</div>
                     </div>
                 </div>
             </section>
+
+            <!-- Query Thread View Modal -->
+            <div id="queryThreadModal" class="modal">
+                <div class="modal-content"
+                    style="max-width: 800px; height: 80vh; display: flex; flex-direction: column;">
+                    <div class="modal-header"
+                        style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <span class="badge" id="threadStatusBadge">Pending</span>
+                            <h3 id="threadTitle" style="margin: 5px 0;">Query Title</h3>
+                            <small id="threadMeta" style="color: #666;">Subject • Faculty</small>
+                        </div>
+                        <span class="close" onclick="closeQueryThreadModal()">&times;</span>
+                    </div>
+
+                    <div id="threadMessages"
+                        style="flex: 1; overflow-y: auto; padding: 10px; background: #f9f9f9; border-radius: 8px; margin-bottom: 15px;">
+                        <!-- Messages go here -->
+                    </div>
+
+                    <div class="thread-actions" style="border-top: 1px solid #eee; pt-3;">
+                        <form id="replyForm" onsubmit="event.preventDefault(); submitQueryReply();"
+                            style="display: flex; gap: 10px;">
+                            <textarea id="replyContent" rows="1" placeholder="Type a follow-up date..."
+                                style="flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ddd; resize: none;"
+                                required></textarea>
+                            <button type="submit" class="btn btn-primary"
+                                style="border-radius: 50%; width: 40px; height: 40px; padding: 0; display: flex; align-items: center; justify-content: center;"><i
+                                    class="fas fa-paper-plane"></i></button>
+                        </form>
+                        <div
+                            style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+                            <button onclick="markQueryResolved()" id="resolveBtn"
+                                class="btn btn-sm btn-outline-success">
+                                <i class="fas fa-check"></i> Mark as Resolved
+                            </button>
+                            <small class="text-muted">Attachments supported soon</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- ID Card Section -->
             <section id="idcard" class="content-section">
@@ -435,9 +473,6 @@
             <section id="clubs" class="content-section">
                 <div class="section-header">
                     <h2>College Clubs</h2>
-                    <button onclick="openInterestSurvey()" class="add-btn">
-                        <i class="fas fa-search"></i> Find My Clubs
-                    </button>
                 </div>
 
                 <div class="clubs-tabs">
@@ -566,6 +601,24 @@
                 </div>
             </section>
 
+            <!-- Examinations Section -->
+            <section id="exams" class="content-section">
+                <div class="section-header">
+                    <h2>Examination Schedule</h2>
+                </div>
+
+                <div class="exam-schedule-container"
+                    style="background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);">
+                    <div id="examScheduleWrapper">
+                        <!-- Loading State -->
+                        <div style="text-align: center; padding: 30px; color: #666;">
+                            <i class="fas fa-spinner fa-spin fa-2x"></i>
+                            <p style="margin-top: 10px;">Loading exam schedule...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Settings Section -->
             <section id="settings" class="content-section">
                 <div class="section-header">
@@ -671,33 +724,66 @@
         </main>
     </div>
 
-    <!-- Academic Query Modal -->
+    <!-- Create Query Modal (Expanded) -->
     <div id="academicQueryModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeAcademicQueryModal()">&times;</span>
-            <h3>Ask Faculty - Academic Query</h3>
+            <h3>Raise New Query</h3>
             <form id="academicQueryForm">
+
+                <!-- Query Type Selection -->
                 <div class="form-group">
-                    <label for="querySubject">Subject:</label>
-                    <select id="querySubject" required>
-                        <option value="">Select Subject</option>
-                        <!-- Subjects will be loaded dynamically -->
-                    </select>
+                    <label>Query Type:</label>
+                    <div style="display: flex; gap: 20px; margin-top: 5px;">
+                        <label style="font-weight: normal; cursor: pointer;">
+                            <input type="radio" name="queryType" value="academic" checked
+                                onchange="toggleQueryType('academic')">
+                            Academic (Ask Faculty)
+                        </label>
+                        <label style="font-weight: normal; cursor: pointer;">
+                            <input type="radio" name="queryType" value="mentorship"
+                                onchange="toggleQueryType('mentorship')">
+                            Mentorship (Ask Mentor)
+                        </label>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="queryFaculty">Faculty:</label>
-                    <select id="queryFaculty" required>
-                        <option value="">Select Faculty</option>
-                        <!-- Faculty will be loaded based on subject -->
-                    </select>
+
+                <!-- Academic Fields (Subject & Faculty) -->
+                <div id="academicFields">
+                    <div class="form-group">
+                        <label for="querySubject">Subject:</label>
+                        <select id="querySubject" onchange="loadFacultyForSubject()">
+                            <option value="">Select Subject</option>
+                            <!-- Subjects will be loaded dynamically -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="queryFaculty">Faculty:</label>
+                        <select id="queryFaculty" disabled>
+                            <option value="">Select Subject First</option>
+                        </select>
+                        <small style="color: #666; font-size: 0.8em; display: block; margin-top: 3px;">
+                            * Only faculty teaching this subject are shown. If unsure, leave blank for auto-assignment.
+                        </small>
+                    </div>
                 </div>
+
+                <!-- Mentor Fields (Auto-assign info) -->
+                <div id="mentorFields"
+                    style="display: none; background: #e3f2fd; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                    <p style="margin: 0; color: #0d47a1; font-size: 0.9rem;">
+                        <i class="fas fa-info-circle"></i> This query will be automatically assigned to your designated
+                        Mentor.
+                    </p>
+                </div>
+
                 <div class="form-group">
                     <label for="queryTitle">Query Title:</label>
-                    <input type="text" id="queryTitle" required>
+                    <input type="text" id="queryTitle" required placeholder="Brief title of your query">
                 </div>
                 <div class="form-group">
                     <label for="queryDescription">Describe your query:</label>
-                    <textarea id="queryDescription" rows="4" required></textarea>
+                    <textarea id="queryDescription" rows="4" required placeholder="Detailed explanation..."></textarea>
                 </div>
                 <div class="form-group">
                     <label for="queryAttachment">Attach Image (Optional):</label>
@@ -705,6 +791,56 @@
                 </div>
                 <button type="submit" class="submit-query-btn">Submit Query</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Query Thread Modal with Document Sharing -->
+    <div id="queryThreadModal" class="modal">
+        <div class="modal-content"
+            style="max-width: 800px; height: 80vh; display: flex; flex-direction: column; padding: 0;">
+            <div class="modal-header"
+                style="padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h3 id="threadTitle" style="margin: 0; font-size: 1.2rem;">Query Title</h3>
+                    <div style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                        <span id="threadSubject">Subject</span> • <span id="threadFaculty">Faculty</span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span id="threadStatus" class="badge">PENDING</span>
+                    <span class="close" onclick="closeQueryThreadModal()"
+                        style="font-size: 1.5rem; cursor: pointer;">&times;</span>
+                </div>
+            </div>
+
+            <div id="threadMessages"
+                style="flex: 1; overflow-y: auto; padding: 20px; background: #f8f9fa; display: flex; flex-direction: column; gap: 15px;">
+                <!-- Messages dynamic content -->
+            </div>
+
+            <div class="chat-input-area" style="padding: 15px; border-top: 1px solid #eee; background: white;">
+                <textarea id="replyContent" rows="2" placeholder="Type your reply here..."
+                    style="width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; resize: none; margin-bottom: 10px;"></textarea>
+
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label for="replyFile"
+                            style="cursor: pointer; color: #0d6efd; display: flex; align-items: center; gap: 5px; font-size: 0.9rem;">
+                            <i class="fas fa-paperclip"></i> Attach File
+                        </label>
+                        <input type="file" id="replyFile" class="form-control" style="display: none;"
+                            onchange="document.getElementById('fileNameDisplay').textContent = this.files[0]?.name || ''">
+                        <span id="fileNameDisplay" style="font-size: 0.8rem; color: #666;"></span>
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="markQueryResolved()" class="btn btn-outline-success btn-sm">Mark
+                            Resolved</button>
+                        <button onclick="submitQueryReply()" class="btn btn-primary btn-sm"
+                            style="padding: 5px 20px;">Send Reply</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -717,44 +853,52 @@
             <form id="interestSurveyForm">
                 <div class="interests-grid">
                     <label class="interest-item">
-                        <input type="checkbox" value="programming">
-                        <span>Programming</span>
+                        <input type="checkbox" name="interests" value="coding">
+                        <span>Coding</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="robotics">
-                        <span>Robotics</span>
+                        <input type="checkbox" name="interests" value="tech">
+                        <span>Tech</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="music">
+                        <input type="checkbox" name="interests" value="events">
+                        <span>Events</span>
+                    </label>
+                    <label class="interest-item">
+                        <input type="checkbox" name="interests" value="social media">
+                        <span>Social Media</span>
+                    </label>
+                    <label class="interest-item">
+                        <input type="checkbox" name="interests" value="music">
                         <span>Music</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="photography">
-                        <span>Photography</span>
+                        <input type="checkbox" name="interests" value="artist">
+                        <span>Artist</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="sports">
-                        <span>Sports</span>
+                        <input type="checkbox" name="interests" value="jamming">
+                        <span>Jamming</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="dance">
-                        <span>Dance</span>
+                        <input type="checkbox" name="interests" value="magazines">
+                        <span>Magazines</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="drama">
-                        <span>Drama</span>
+                        <input type="checkbox" name="interests" value="content writing">
+                        <span>Content Writing</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="debate">
-                        <span>Debate</span>
+                        <input type="checkbox" name="interests" value="marketing">
+                        <span>Marketing</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="art">
-                        <span>Art & Craft</span>
+                        <input type="checkbox" name="interests" value="logistics">
+                        <span>Logistics</span>
                     </label>
                     <label class="interest-item">
-                        <input type="checkbox" value="literature">
-                        <span>Literature</span>
+                        <input type="checkbox" name="interests" value="cultural activities">
+                        <span>Cultural Activities</span>
                     </label>
                 </div>
                 <button type="submit" class="find-clubs-btn">Find My Clubs</button>
@@ -821,7 +965,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/student-dashboard.js') }}?v=3.09"></script>
+    <script src="{{ url_for('static', filename='js/student-dashboard.js') }}?v=3.10"></script>
 </body>
 
 </html>

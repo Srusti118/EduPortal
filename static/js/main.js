@@ -11,35 +11,35 @@ function selectRole(role) {
 function showLoginModal(role) {
     const modal = document.getElementById('loginModal');
     const modalTitle = document.getElementById('modalTitle');
-    
+
     modalTitle.textContent = `${role.charAt(0).toUpperCase() + role.slice(1)} Login`;
     modal.style.display = 'block';
 }
 
 // Close modal functionality
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const modal = document.getElementById('loginModal');
     const closeBtn = document.querySelector('.close');
     const loginForm = document.getElementById('loginForm');
 
     // Close modal when clicking X
-    closeBtn.onclick = function() {
+    closeBtn.onclick = function () {
         modal.style.display = 'none';
     }
 
     // Close modal when clicking outside
-    window.onclick = function(event) {
+    window.onclick = function (event) {
         if (event.target === modal) {
             modal.style.display = 'none';
         }
     }
 
     // Handle login form submission
-    loginForm.onsubmit = function(e) {
+    loginForm.onsubmit = function (e) {
         e.preventDefault();
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
-        
+
         // Send login request to Flask backend
         fetch('/api/login', {
             method: 'POST',
@@ -52,28 +52,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 role: currentRole
             })
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                // Store user data in localStorage
-                localStorage.setItem('userData', JSON.stringify(data.user));
-                
-                // Redirect based on role
-                redirectToDashboard(currentRole);
-            } else {
-                alert(data.message || 'Login failed. Please check your credentials.');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('An error occurred during login. Please try again.');
-        });
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Store user data in sessionStorage (Tab specific)
+                    sessionStorage.setItem('userData', JSON.stringify(data.user));
+
+                    // Redirect based on role
+                    redirectToDashboard(currentRole);
+                } else {
+                    alert(data.message || 'Login failed. Please check your credentials.');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred during login. Please try again.');
+            });
     }
 });
 
 // Redirect to appropriate dashboard
 function redirectToDashboard(role) {
-    switch(role) {
+    switch (role) {
         case 'student':
             window.location.href = '/student-dashboard';
             break;
@@ -89,20 +89,20 @@ function redirectToDashboard(role) {
 }
 
 // Add some interactive effects
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Add hover effects to role cards
     const roleCards = document.querySelectorAll('.role-card');
-    
+
     roleCards.forEach(card => {
-        card.addEventListener('mouseenter', function() {
+        card.addEventListener('mouseenter', function () {
             this.style.transform = 'translateY(-10px) scale(1.02)';
         });
-        
-        card.addEventListener('mouseleave', function() {
+
+        card.addEventListener('mouseleave', function () {
             this.style.transform = 'translateY(0) scale(1)';
         });
     });
-    
+
     // Add floating animation to logo
     const logoIcon = document.querySelector('.logo-icon');
     setInterval(() => {

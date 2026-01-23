@@ -24,14 +24,9 @@ class Student(db.Model):
     mentor = db.Column(db.String(100))
     function = db.Column(db.Integer, default=1)  # 1=Active, 0=Inactive
     admission_year = db.Column(db.Integer, nullable=False)
-    cgpa = db.Column(db.Float, default=0.0)
-    photo_url = db.Column(db.String(500))
-    annual_income = db.Column(db.Float, default=0.0)
-    category = db.Column(db.String(20))  # general, obc, sc, st, ews
-    gender = db.Column(db.String(10))
-    blood_group = db.Column(db.String(5))
-    emergency_contact = db.Column(db.String(15))
-    address = db.Column(db.Text)
+    function = db.Column(db.Integer, default=1)  # 1=Active, 0=Inactive
+    admission_year = db.Column(db.Integer, nullable=False)
+    # Removed: cgpa, photo_url, annual_income, category, gender, blood_group, emergency_contact, address
     
     user = db.relationship('User', backref=db.backref('student', uselist=False))
 
@@ -39,13 +34,9 @@ class Faculty(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     faculty_id = db.Column(db.String(20), unique=True, nullable=False)
-    designation = db.Column(db.String(50), nullable=False)
-    experience_years = db.Column(db.Integer, default=0)
-    specialization = db.Column(db.String(100))
-    # New fields for enhanced details
-    assigned_classes = db.Column(db.String(200)) # e.g., "CSE-A, CSE-B"
-    assigned_semesters = db.Column(db.String(100)) # e.g., "1st, 3rd"
-    assigned_subjects = db.Column(db.String(200)) # e.g., "Data Stuctures, Algorithms"
+    # Kept only requested columns
+    assigned_semesters = db.Column(db.String(100)) # e.g., "4"
+    assigned_subjects = db.Column(db.String(200)) # e.g., "FCSP-1, PS"
     
     user = db.relationship('User', backref=db.backref('faculty', uselist=False))
 
@@ -58,125 +49,38 @@ class Course(db.Model):
     total_semesters = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class Subject(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    subject_code = db.Column(db.String(10), unique=True, nullable=False)
-    subject_name = db.Column(db.String(100), nullable=False)
-    semester = db.Column(db.Integer, nullable=False)
-    course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
-    credits = db.Column(db.Integer, default=3)
-    
-    course = db.relationship('Course', backref='subjects')
+# Subject model removed
 
-class SubjectAssignment(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
-    academic_year = db.Column(db.String(10), nullable=False)
-    semester = db.Column(db.Integer, nullable=False)
-    
-    faculty = db.relationship('Faculty', backref='assignments')
-    subject = db.relationship('Subject', backref='assignments')
+
+# SubjectAssignment model removed
+
 
 class Attendance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
+    # subject_id removed as Subject table is deleted
+    subject_name = db.Column(db.String(100), nullable=False)
     date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(10), nullable=False)  # present, absent
     marked_by = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
     
     student = db.relationship('Student', backref='attendances')
-    subject = db.relationship('Subject', backref='attendances')
     faculty = db.relationship('Faculty', backref='marked_attendances')
 
-class Marks(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
-    exam_type = db.Column(db.String(20), nullable=False)  # internal, external, assignment
-    marks_obtained = db.Column(db.Float, nullable=False)
-    max_marks = db.Column(db.Float, nullable=False)
-    exam_date = db.Column(db.Date)
-    semester = db.Column(db.Integer, nullable=False)
-    
-    student = db.relationship('Student', backref='marks')
-    subject = db.relationship('Subject', backref='marks')
+# Marks model removed
 
-class Notice(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    content = db.Column(db.Text, nullable=False)
-    notice_type = db.Column(db.String(20), nullable=False)  # general, exam, holiday, event, urgent
-    target_audience = db.Column(db.String(20), nullable=False)  # all, students, faculty, department
-    department = db.Column(db.String(50))  # if target is department
-    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime)
-    is_active = db.Column(db.Boolean, default=True)
-    
-    creator = db.relationship('User', backref='notices')
 
-class StudyMaterial(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
-    uploaded_by = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    file_path = db.Column(db.String(500), nullable=False)
-    file_type = db.Column(db.String(10), nullable=False)
-    semester = db.Column(db.Integer, nullable=False)
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    subject = db.relationship('Subject', backref='materials')
-    faculty = db.relationship('Faculty', backref='materials')
+# Notice model removed
 
-class FeeStructure(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
-    semester = db.Column(db.Integer, nullable=False)
-    tuition_fee = db.Column(db.Float, nullable=False)
-    lab_fee = db.Column(db.Float, default=0.0)
-    library_fee = db.Column(db.Float, default=0.0)
-    other_fees = db.Column(db.Float, default=0.0)
-    total_fee = db.Column(db.Float, nullable=False)
-    academic_year = db.Column(db.String(10), nullable=False)
-    
-    course = db.relationship('Course', backref='fee_structures')
 
-class FeePayment(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    fee_structure_id = db.Column(db.Integer, db.ForeignKey('fee_structure.id'), nullable=False)
-    amount_paid = db.Column(db.Float, nullable=False)
-    payment_date = db.Column(db.DateTime, default=datetime.utcnow)
-    payment_method = db.Column(db.String(20), nullable=False)
-    transaction_id = db.Column(db.String(100), unique=True)
-    status = db.Column(db.String(20), default='completed')
-    
-    student = db.relationship('Student', backref='fee_payments')
-    fee_structure = db.relationship('FeeStructure', backref='payments')
+# StudyMaterial model removed
 
-class Event(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, nullable=False)
-    event_type = db.Column(db.String(50), nullable=False)  # technical, cultural, sports, workshop
-    start_date = db.Column(db.DateTime, nullable=False)
-    end_date = db.Column(db.DateTime, nullable=False)
-    venue = db.Column(db.String(200))
-    organizer_name = db.Column(db.String(100))
-    contact_person = db.Column(db.String(100))
-    contact_phone = db.Column(db.String(15))
-    contact_email = db.Column(db.String(100))
-    registration_required = db.Column(db.Boolean, default=False)
-    registration_deadline = db.Column(db.DateTime)
-    max_participants = db.Column(db.Integer)
-    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    is_active = db.Column(db.Boolean, default=True)
-    
-    creator = db.relationship('User', backref='created_events')
+
+# FeeStructure and FeePayment models removed
+
+
+# Event model removed
+
 
 class Club(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -217,39 +121,11 @@ class Timetable(db.Model):
     room_number = db.Column(db.String(50))
     
     # Optional links to core tables (can be populated later if needed)
-    course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=True)
-    semester = db.Column(db.Integer, nullable=True)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=True)
-    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=True)
+    semester = db.Column(db.Integer, default=4, nullable=False)
     academic_year = db.Column(db.String(10), nullable=True)
-    
-    course = db.relationship('Course', backref='timetables')
-    subject = db.relationship('Subject', backref='timetable_entries')
-    faculty = db.relationship('Faculty', backref='timetable_entries')
 
-class StudentQuery(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
-    query_title = db.Column(db.String(200), nullable=False)
-    query_description = db.Column(db.Text, nullable=False)
-    attachment_url = db.Column(db.String(500))  # for photo upload
-    status = db.Column(db.String(20), default='pending')  # pending, answered, closed
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    answered_at = db.Column(db.DateTime)
-    
-    student = db.relationship('Student', backref='subject_queries')
-    faculty = db.relationship('Faculty', backref='student_queries')
-    subject = db.relationship('Subject', backref='student_queries')
+# StudentQuery and QueryResponse models removed
 
-class QueryResponse(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    query_id = db.Column(db.Integer, db.ForeignKey('student_query.id'), nullable=False)
-    response_text = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    query = db.relationship('StudentQuery', backref='responses')
 
 class Scholarship(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -267,16 +143,8 @@ class Scholarship(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class ScholarshipApplication(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    scholarship_id = db.Column(db.Integer, db.ForeignKey('scholarship.id'), nullable=False)
-    application_date = db.Column(db.DateTime, default=datetime.utcnow)
-    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
-    documents_submitted = db.Column(db.Boolean, default=False)
-    
-    student = db.relationship('Student', backref='scholarship_applications')
-    scholarship = db.relationship('Scholarship', backref='applications')
+# ScholarshipApplication model removed
+
 
 class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -289,27 +157,68 @@ class Notification(db.Model):
     
     user = db.relationship('User', backref='notifications')
 
-class Mentorship(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
-    assigned_date = db.Column(db.DateTime, default=datetime.utcnow)
-    is_active = db.Column(db.Boolean, default=True)
-    
-    faculty = db.relationship('Faculty', backref='mentees')
-    student = db.relationship('Student', backref='mentors')
+# Mentorship model removed
 
-class LectureSwapRequest(db.Model):
+
+# LectureSwapRequest model removed (Replaced by QueryThread system)
+
+class QueryThread(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    requesting_faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False)
-    target_faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id')) # Can be null if open request
-    timetable_id = db.Column(db.Integer, db.ForeignKey('timetable.id'), nullable=False)
-    date = db.Column(db.Date) # Date of the lecture to be swapped (if temporary)
-    status = db.Column(db.String(20), default='pending') # pending, approved, rejected
-    reason = db.Column(db.String(200))
+    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
+    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=True) # Nullable if unassigned initially
+    subject_name = db.Column(db.String(100), nullable=True) # Nullable for mentorship
+    title = db.Column(db.String(200), nullable=False)
+    status = db.Column(db.String(20), default='pending') # pending, answered, resolved, clarification
+    priority = db.Column(db.String(20), default='normal')
+    query_type = db.Column(db.String(20), default='academic') # 'academic' or 'mentorship'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    is_temporary = db.Column(db.Boolean, default=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    requesting_faculty = db.relationship('Faculty', foreign_keys=[requesting_faculty_id], backref='sent_swap_requests')
-    target_faculty = db.relationship('Faculty', foreign_keys=[target_faculty_id], backref='received_swap_requests')
-    timetable_entry = db.relationship('Timetable', backref='swap_requests')
+    student = db.relationship('Student', backref='query_threads')
+    faculty = db.relationship('Faculty', backref='assigned_queries')
+
+class QueryPost(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    thread_id = db.Column(db.Integer, db.ForeignKey('query_thread.id'), nullable=False)
+    author_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False) # User ID of sender
+    role = db.Column(db.String(20), nullable=False) # student, faculty
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    thread = db.relationship('QueryThread', backref=db.backref('posts', order_by=created_at))
+    author = db.relationship('User')
+
+class QueryAttachment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('query_post.id'), nullable=False)
+    file_url = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(50))
+    file_name = db.Column(db.String(200)) # Original name
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    post = db.relationship('QueryPost', backref='attachments')
+
+
+class ExamSchedule(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False) # e.g. "Winter Semester 2025"
+    academic_year = db.Column(db.String(20), nullable=False)
+    semester_type = db.Column(db.String(20)) # odd/even or specific semester number
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    is_published = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Exam(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    exam_schedule_id = db.Column(db.Integer, db.ForeignKey('exam_schedule.id'), nullable=False)
+    # subject_id removed as Subject table deleted
+    subject_name = db.Column(db.String(100), nullable=False)
+    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id')) # Invigilator
+    exam_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    room_number = db.Column(db.String(20))
+    
+    exam_schedule = db.relationship('ExamSchedule', backref='exams')
+    faculty = db.relationship('Faculty', backref='invigilated_exams')

@@ -1,5 +1,30 @@
 // Global variables
 console.log("Student Dashboard JS v3.06 Loaded");
+
+// --- Auth Token Injection (Multi-Tab Support) ---
+const originalFetch = window.fetch;
+window.fetch = function (url, options) {
+    options = options || {};
+    options.headers = options.headers || {};
+
+    // Inject Token inside headers
+    const userDataStr = sessionStorage.getItem('userData');
+    if (userDataStr) {
+        try {
+            const userData = JSON.parse(userDataStr);
+            if (userData.token) {
+                if (options.headers instanceof Headers) {
+                    options.headers.append('X-Auth-Token', userData.token);
+                } else {
+                    options.headers['X-Auth-Token'] = userData.token;
+                }
+            }
+        } catch (e) { console.error("Auth Token Error", e); }
+    }
+    return originalFetch(url, options);
+};
+// ------------------------------------------------
+
 let currentUser = null;
 let marksChart = null;
 
@@ -57,8 +82,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // Load user data from localStorage
-    const userData = localStorage.getItem('userData');
+    // Load user data from sessionStorage (Tab Specific)
+    const userData = sessionStorage.getItem('userData');
     if (userData) {
         currentUser = JSON.parse(userData);
         // Put fresh data fetch here
@@ -87,12 +112,13 @@ document.addEventListener('DOMContentLoaded', function () {
     initializeCharts();
 
     // Load initial data
-    loadAttendanceData();
-    loadMarksData();
-    loadNotices();
-    loadFeeDetails();
-    loadScholarships();
-    loadQueries();
+    // Load initial data
+    // loadAttendanceData(); // Removed
+    // loadMarksData(); // Removed
+    // loadNotices(); // Removed
+    // loadFeeDetails(); // Removed
+    // loadScholarships(); // Removed
+    // loadQueries(); // Removed
     loadNotifications();
     loadStudentTimetable();
 
@@ -177,10 +203,34 @@ async function loadStudentTimetable() {
 
     try {
         const response = await fetch(`/api/student/timetable/${currentUser.student_id || currentUser.id}`);
-        const timetable = await response.json();
+        const timetableList = await response.json();
 
-        if (timetable.error) {
-            console.error(timetable.error);
+        // Transform Array to Map keys
+        const timetable = {};
+        if (Array.isArray(timetableList)) {
+            timetableList.forEach(item => {
+                const dayKey = item.day.toLowerCase();
+                if (!timetable[dayKey]) timetable[dayKey] = {};
+
+                // Normalize time: API "08:45 AM - 09:45 AM" -> JS "08:45 AM-09:45 AM"
+                // Remove spaces around hyphen
+                const timeKey = item.time.replace(/\s+-\s+/, '-');
+
+                timetable[dayKey][timeKey] = {
+                    subject_name: item.subject,
+                    faculty_name: item.faculty,
+                    room_number: item.room,
+                    status: 'scheduled'
+                };
+            });
+        } else if (timetableList && !timetableList.error) {
+            // Fallback if it was already an object (unlikely given app.py)
+            // But just in case
+            Object.assign(timetable, timetableList);
+        }
+
+        if (timetableList.error) {
+            console.error(timetableList.error);
             return;
         }
 
@@ -313,6 +363,7 @@ function showSection(sectionId) {
         'fees': 'Fee Management',
         'queries': 'Query Management',
         'examination': 'Examination Module',
+        'exams': 'Examination Schedule',
         'clubs': 'Recommended Clubs',
         'timetable': 'Class Timetable',
         'scholarship': 'Scholarship Opportunities'
@@ -345,6 +396,9 @@ function showSection(sectionId) {
             break;
         case 'idcard':
             loadStudentIdCard();
+            break;
+        case 'exams':
+            loadExamSchedule();
             break;
         case 'clubs':
             // Default to 'All Clubs' to ensure content is visible
@@ -1522,28 +1576,34 @@ function loadStudentClubs() {
                 else if (cat.includes('social') || cat.includes('service')) iconClass = 'fa-hands-helping';
 
                 const card = document.createElement('div');
-                card.className = 'club-card';
+                card.className = 'club-recommendation-card'; // Use same class as recommendations
+
+                // Interests tags
+                const interestsHtml = club.interests && club.interests.length > 0
+                    ? `<div class="matching-interests" style="margin-top: 10px;">
+                        <strong>Interests:</strong>
+                        ${club.interests.map(i => `<span class="interest-tag">${i}</span>`).join('')}
+                       </div>`
+                    : '';
+
                 card.innerHTML = `
-                    <div class="club-bg-icon"><i class="fas ${iconClass}"></i></div>
-                    <div class="club-header">
-                        <h3>${club.name}</h3>
+                    <div class="recommendation-header">
+                        <h4>${club.name}</h4>
                         <span class="club-category tag-${club.category}">${club.category}</span>
                     </div>
-                    <div class="club-body">
-                        <p>${club.description}</p>
-                        <div class="club-meta">
-                            <span><i class="fas fa-calendar-alt"></i> ${club.meeting_schedule}</span>
-                        </div>
+                    <p class="club-description">${club.description}</p>
+                    ${interestsHtml}
+                    <div class="club-contact">
+                        <p><strong>Coordinator:</strong> ${club.faculty_coordinator || 'N/A'}</p>
+                        <p><strong>Contact:</strong> ${club.contact_email || 'N/A'}</p>
+                        ${club.meeting_schedule ? `<p><strong>Schedule:</strong> ${club.meeting_schedule}</p>` : ''}
                     </div>
-                    <div class="club-footer">
+                    <div class="club-actions" style="margin-top: 15px; display: flex; gap: 10px;">
                         ${club.instagram_link ?
-                        `<a href="${club.instagram_link}" target="_blank" class="instagram-btn">
-                             <i class="fab fa-instagram"></i> Instagram
-                           </a>` : ''}
-                        
-                        <button onclick="registerForClub(${club.id}, '${club.name}')" class="register-btn">
-                            Register
-                        </button>
+                        `<a href="${club.instagram_link}" target="_blank" class="instagram-btn" style="flex: 1; display: flex; align-items: center; justify-content: center; background: #E1306C; color: white; border: none; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 0.9rem;">
+                            <i class="fab fa-instagram" style="margin-right: 8px;"></i> Instagram
+                        </a>` : ''}
+                        <button onclick="registerForClub(${club.id}, '${club.name}')" class="register-btn" style="flex: 2; background: #4a90e2; color: white; border: none; padding: 8px 15px; border-radius: 6px; font-weight: 500;">Register</button>
                     </div>
                 `;
                 container.appendChild(card);
@@ -1563,7 +1623,8 @@ function closeInterestSurvey() {
 }
 
 // Show club tab
-function showClubTab(tabName) {
+// Show club tab
+function showClubTab(tabName, fromSurvey = false) {
     document.querySelectorAll('.club-tab-content').forEach(tab => {
         tab.classList.remove('active');
     });
@@ -1571,23 +1632,36 @@ function showClubTab(tabName) {
         btn.classList.remove('active');
     });
 
-    document.getElementById(`${tabName}Tab`).classList.add('active');
-    event.currentTarget.classList.add('active'); // Use currentTarget to handle button clicks safely
+    const tabId = tabName === 'all' ? 'allClubsTab' : `${tabName}Tab`;
+    const tabElement = document.getElementById(tabId);
+    if (tabElement) {
+        tabElement.classList.add('active');
+    }
+
+    // Safely handle button active state
+    // Use a selector to find the specific button if event is missing
+    if (event && event.currentTarget && event.currentTarget.classList) {
+        event.currentTarget.classList.add('active');
+    } else {
+        // Fallback: highlight the button that corresponds to this tab
+        const specificBtn = document.querySelector(`.tab-btn[onclick*="'${tabName}'"]`);
+        if (specificBtn) specificBtn.classList.add('active');
+    }
 
     if (tabName === 'all') {
         loadStudentClubs();
-        document.getElementById('allClubsGrid').style.display = 'grid';
-        if (document.getElementById('myClubsGrid')) document.getElementById('myClubsGrid').style.display = 'none';
-        if (document.getElementById('clubRecommendations')) document.getElementById('clubRecommendations').style.display = 'none';
+        // Automatic via CSS class
     } else if (tabName === 'my') {
         loadMyClubMemberships();
-        if (document.getElementById('allClubsGrid')) document.getElementById('allClubsGrid').style.display = 'none';
-        if (document.getElementById('myClubsGrid')) document.getElementById('myClubsGrid').style.display = 'grid';
-        if (document.getElementById('clubRecommendations')) document.getElementById('clubRecommendations').style.display = 'none';
-    } else if (tabName === 'recommendations') { // Handle recommendations tab
-        if (document.getElementById('allClubsGrid')) document.getElementById('allClubsGrid').style.display = 'none';
-        if (document.getElementById('myClubsGrid')) document.getElementById('myClubsGrid').style.display = 'none';
-        if (document.getElementById('clubRecommendations')) document.getElementById('clubRecommendations').style.display = 'grid';
+        // Automatic via CSS class
+    } else if (tabName === 'recommendations') {
+        // Handle recommendations tab
+        // Automatic via CSS class
+
+        // Auto-open survey if not coming from survey completion
+        if (!fromSurvey) {
+            openInterestSurvey();
+        }
     }
 }
 
@@ -1872,21 +1946,45 @@ function applyForScholarship(scholarshipId) {
 // Form submission handlers
 document.addEventListener('DOMContentLoaded', function () {
     // Academic query form
+    // Academic query form with enhanced logic
     const academicQueryForm = document.getElementById('academicQueryForm');
     if (academicQueryForm) {
         academicQueryForm.addEventListener('submit', function (e) {
             e.preventDefault();
 
             const formData = new FormData(this);
+            const queryType = formData.get('queryType');
+
             const queryData = {
                 student_id: currentUser.id,
-                subject_id: formData.get('querySubject'),
-                faculty_id: formData.get('queryFaculty'),
-                query_title: formData.get('queryTitle'),
-                query_description: formData.get('queryDescription')
+                query_type: queryType,
+                title: formData.get('queryTitle'), // Mapped from updated ID
+                content: formData.get('queryDescription') // Mapped from updated ID
             };
 
-            fetch('/api/student/queries', {
+            // Conditional Data
+            if (queryType === 'academic') {
+                queryData.subject_name = formData.get('querySubject'); // Note: ID is querySubject, name might be missing in HTML? Check HTML input names.
+                // In HTML replace I didn't set 'name' attribute for select. I should rely on ID or fix HTML.
+                // Correction: FormData uses 'name' attribute. The HTML I pasted has id="querySubject" but NO name="querySubject".
+                // I should assume I need to get by ID if name is missing, but FormData requires name.
+                // Let's use document.getElementById since I control the IDs.
+                queryData.subject_name = document.getElementById('querySubject').value;
+                queryData.faculty_id = document.getElementById('queryFaculty').value;
+
+                if (!queryData.subject_name) {
+                    alert('Please select a subject.');
+                    return;
+                }
+            } else {
+                queryData.subject_name = 'Mentorship';
+            }
+
+            // Manual check for title/desc if names missing
+            queryData.title = document.getElementById('queryTitle').value;
+            queryData.content = document.getElementById('queryDescription').value;
+
+            fetch('/api/queries/create', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1896,17 +1994,19 @@ document.addEventListener('DOMContentLoaded', function () {
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        alert('Query submitted successfully!');
+                        alert(data.message || 'Query submitted successfully!');
                         closeAcademicQueryModal();
                         this.reset();
+                        // Reset UI state
+                        toggleQueryType('academic');
                         loadAcademicQueries();
                     } else {
-                        alert('Failed to submit query');
+                        alert(data.error || 'Failed to submit query');
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    alert('An error occurred while submitting the query');
+                    alert('An error occurred. Please try again.');
                 });
         });
     }
@@ -1936,7 +2036,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 .then(data => {
                     updateClubRecommendations(data);
                     closeInterestSurvey();
-                    showClubTab('recommendations');
+                    showClubTab('recommendations', true);
                 })
                 .catch(error => {
                     console.error('Error:', error);
@@ -1986,10 +2086,16 @@ function updateClubRecommendations(recommendations) {
                 ${rec.matching_interests.map(interest => `<span class="interest-tag">${interest}</span>`).join('')}
             </div>
             <div class="club-contact">
-                <p><strong>Coordinator:</strong> ${club.faculty_coordinator}</p>
+                <p><strong>Coordinator:</strong> ${club.faculty_coordinator || 'N/A'}</p>
                 <p><strong>Contact:</strong> ${club.contact_email}</p>
             </div>
-            <button onclick="joinClub(${club.id})" class="join-club-btn">Join This Club</button>
+            <div class="club-actions" style="margin-top: 15px; display: flex; gap: 10px;">
+                ${club.instagram_link ?
+                `<a href="${club.instagram_link}" target="_blank" class="instagram-btn" style="flex: 1; display: flex; align-items: center; justify-content: center; background: #E1306C; color: white; border: none; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 0.9rem;">
+                    <i class="fab fa-instagram" style="margin-right: 8px;"></i> Instagram
+                </a>` : ''}
+                <button onclick="joinClub(${club.id})" class="join-club-btn" style="flex: 2;">Join This Club</button>
+            </div>
         `;
 
         container.appendChild(card);
@@ -2239,7 +2345,84 @@ function injectDarkStyles() {
     }
 }
 
-// Google Drive folder links
+// Load Exam Schedule
+function loadExamSchedule() {
+    const wrapper = document.getElementById('examScheduleWrapper');
+    if (!wrapper) return;
+
+    wrapper.innerHTML = '<div style="text-align: center; padding: 30px; color: #666;"><i class="fas fa-spinner fa-spin fa-2x"></i><p style="margin-top: 10px;">Loading exam schedule...</p></div>';
+
+    fetch('/api/student/exams')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                wrapper.innerHTML = `<div class="error-state" style="text-align:center; padding:30px; color:#dc3545;"><i class="fas fa-exclamation-circle fa-2x"></i><p>${data.error}</p></div>`;
+                return;
+            }
+
+            if (data.length === 0) {
+                wrapper.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px; color: #666;">
+                        <i class="fas fa-calendar-check" style="font-size: 3rem; margin-bottom: 20px; color: #ddd;"></i>
+                        <p>No exam schedule published yet.</p>
+                    </div>`;
+                return;
+            }
+
+            // Group by date (optional) or just list
+            let html = `
+                <table class="data-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                    <thead>
+                        <tr style="background: #f8fafc; text-align: left;">
+                            <th style="padding: 15px; font-weight: 600; color: #444; border-bottom: 2px solid #eef2f7;">Subject</th>
+                            <th style="padding: 15px; font-weight: 600; color: #444; border-bottom: 2px solid #eef2f7;">Date & Time</th>
+                            <th style="padding: 15px; font-weight: 600; color: #444; border-bottom: 2px solid #eef2f7;">Room</th>
+                            <th style="padding: 15px; font-weight: 600; color: #444; border-bottom: 2px solid #eef2f7;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.forEach(exam => {
+                html += `
+                    <tr style="border-bottom: 1px solid #eee; transition: background 0.2s;">
+                        <td style="padding: 15px;">
+                            <div style="font-weight: 600; color: #333;">${exam.subject_name}</div>
+                            <div style="font-size: 0.85em; color: #888;">${exam.subject_code}</div>
+                        </td>
+                        <td style="padding: 15px;">
+                            <div style="color: #333;"><i class="far fa-calendar-alt" style="margin-right:5px; color:#667eea;"></i> ${exam.date}</div>
+                            <div style="font-size: 0.9em; color: #666; margin-top:4px;"><i class="far fa-clock" style="margin-right:5px; color:#667eea;"></i> ${exam.time}</div>
+                        </td>
+                        <td style="padding: 15px; color: #555;">
+                            ${exam.room || 'TBA'}
+                        </td>
+                        <td style="padding: 15px;">
+                            <span class="status-badge ${exam.status_class}" style="
+                                padding: 5px 12px; 
+                                border-radius: 20px; 
+                                font-size: 0.85em; 
+                                font-weight: 500;
+                                background: ${exam.status_class === 'upcoming' ? '#e3f2fd' : (exam.status_class === 'ongoing' ? '#fff3cd' : '#e8f5e9')};
+                                color: ${exam.status_class === 'upcoming' ? '#2196f3' : (exam.status_class === 'ongoing' ? '#856404' : '#2e7d32')};
+                            ">
+                                ${exam.status}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            wrapper.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error loading exams:', error);
+            wrapper.innerHTML = `<div class="error-state" style="text-align:center; padding:30px; color:#dc3545;"><i class="fas fa-exclamation-triangle fa-2x"></i><p>Failed to load schedule. Please try again later.</p></div>`;
+        });
+}
+
+// Drive Folders logic (keep at end if present)
 const driveFolders = {
     'DE': 'https://drive.google.com/drive/folders/1guTPdSVE-nHDqZhpwaFi68N-5-kHE92R?usp=drive_link',
     'FSD': 'https://drive.google.com/drive/folders/1z1s0gjMWZ3bIgb5WUjTS1vLLm_K5-N_J?usp=drive_link',
@@ -2264,7 +2447,7 @@ function openDriveFolder(subject) {
                     <small style="opacity: 0.8;">Redirecting to Google Drive</small>
                 </div>
             `;
-            
+
             // Restore original content after a brief delay
             setTimeout(() => {
                 folderCard.style.background = 'white';
@@ -2272,7 +2455,7 @@ function openDriveFolder(subject) {
                 folderCard.innerHTML = originalContent;
             }, 2000);
         }
-        
+
         // Open the Google Drive link in a new tab
         window.open(url, '_blank');
     } else {
@@ -2285,4 +2468,374 @@ function loadNotes() {
     // This function is called when the notes section is shown
     // The folder cards are already loaded in the HTML, so no additional loading needed
     console.log('Notes section loaded - Google Drive folders ready');
+}
+
+// --- Academic Query System Logic ---
+
+let currentQueries = [];
+let currentFilter = 'all';
+let activeThreadId = null;
+
+function loadAcademicQueries() {
+    if (!currentUser) return;
+
+    // Show Loading
+    const container = document.getElementById('academicQueriesList');
+    if (container) container.innerHTML = '<div class="text-center p-4">Loading queries...</div>';
+
+    fetch(`/api/queries/student/${currentUser.student_id || currentUser.id}`)
+        .then(res => res.json())
+        .then(data => {
+            currentQueries = data;
+            renderQueries();
+            updateQueryStats();
+        })
+        .catch(err => {
+            console.error("Error loading queries", err);
+            if (container) container.innerHTML = '<div class="error p-4">Failed to load queries.</div>';
+        });
+}
+
+function filterQueries(status) {
+    currentFilter = status;
+
+    // Update active tab UI
+    document.querySelectorAll('.query-tabs .tab-btn').forEach(btn => {
+        if (btn.textContent.toLowerCase() === status) btn.classList.add('active');
+        else btn.classList.remove('active');
+    });
+
+    renderQueries();
+}
+
+function renderQueries() {
+    const container = document.getElementById('academicQueriesList');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    const filtered = currentQueries.filter(q => {
+        if (currentFilter === 'all') return true;
+        return q.status.toLowerCase() === currentFilter;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="no-data p-4 text-center text-muted">No queries found in this category.</div>';
+        return;
+    }
+
+    filtered.forEach(q => {
+        const card = document.createElement('div');
+        card.className = 'query-card';
+        // Basic Card Styling override or integration
+        card.style.cssText = "background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #eee; cursor: pointer; transition: transform 0.2s; position: relative;";
+        card.onmouseover = () => card.style.transform = "translateY(-2px)";
+        card.onmouseout = () => card.style.transform = "translateY(0)";
+
+        // Status Badge Color
+        let badgeColor = '#6c757d'; // secondary
+        if (q.status === 'answered') badgeColor = '#0d6efd'; // primary
+        if (q.status === 'resolved') badgeColor = '#198754'; // success
+        if (q.status === 'clarification') badgeColor = '#ffc107'; // warning
+
+        // Type UI
+        const isMentor = q.type === 'mentorship';
+        const typeBadge = isMentor
+            ? '<span style="background-color: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-right: 6px; font-weight: bold;">MENTOR</span>'
+            : '<span style="background-color: #17a2b8; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-right: 6px; font-weight: bold;">ACADEMIC</span>';
+
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <h4 style="margin: 0 0 5px 0; color: #333; font-size: 1rem; display: flex; align-items: center;">
+                    ${typeBadge}
+                    <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">${q.title}</span>
+                </h4>
+                <span class="badge" style="background-color: ${badgeColor}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.75rem;">${q.status.toUpperCase()}</span>
+            </div>
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 8px;">
+                <strong>${q.subject}</strong> • ${q.faculty_name}
+            </div>
+            <div style="font-size: 0.9rem; color: #444; margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                ${q.last_message || 'No messages yet.'}
+            </div>
+            <div style="font-size: 0.75rem; color: #999; text-align: right;">
+                Last updated: ${q.updated_at}
+            </div>
+        `;
+
+        card.onclick = () => openQueryThread(q.id);
+        container.appendChild(card);
+    });
+}
+
+function updateQueryStats() {
+    // Simple stats from currentQueries
+    const total = currentQueries.length;
+    const pending = currentQueries.filter(q => q.status === 'pending').length;
+    const answered = currentQueries.filter(q => q.status === 'answered').length;
+
+    if (document.getElementById('totalQueries')) document.getElementById('totalQueries').textContent = total;
+    if (document.getElementById('pendingQueries')) document.getElementById('pendingQueries').textContent = pending;
+    if (document.getElementById('answeredQueries')) document.getElementById('answeredQueries').textContent = answered;
+}
+
+// --- Thread View ---
+
+function openQueryThread(threadId) {
+    activeThreadId = threadId;
+    const modal = document.getElementById('queryThreadModal');
+    const msgContainer = document.getElementById('threadMessages');
+
+    if (modal) {
+        modal.style.display = 'block';
+        if (msgContainer) msgContainer.innerHTML = '<div class="text-center p-3">Loading conversation...</div>';
+
+        fetch(`/api/queries/thread/${threadId}`)
+            .then(res => res.json())
+            .then(data => {
+                renderThreadDetails(data);
+            })
+            .catch(err => {
+                console.error(err);
+                if (msgContainer) msgContainer.innerHTML = '<div class="text-danger p-3">Failed to load thread.</div>';
+            });
+    }
+}
+
+function renderThreadDetails(thread) {
+    const titleEl = document.getElementById('threadTitle');
+    const metaEl = document.getElementById('threadMeta');
+    const statusEl = document.getElementById('threadStatusBadge');
+
+    if (titleEl) titleEl.textContent = thread.title;
+    if (metaEl) metaEl.textContent = `${thread.subject} • ${thread.faculty_name || 'Unassigned'}`;
+    if (statusEl) statusEl.textContent = thread.status.toUpperCase();
+
+    const container = document.getElementById('threadMessages');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (!thread.posts || thread.posts.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No messages yet.</p>';
+        return;
+    }
+
+    thread.posts.forEach(post => {
+        const div = document.createElement('div');
+        const isMe = post.role === 'student'; // Assuming viewer is student
+
+        div.style.cssText = `
+            display: flex; 
+            flex-direction: column; 
+            align-items: ${isMe ? 'flex-end' : 'flex-start'}; 
+            margin-bottom: 15px;
+        `;
+
+        div.innerHTML = `
+            <div style="
+                background: ${isMe ? '#d1e7dd' : 'white'}; 
+                color: ${isMe ? '#0f5132' : '#333'};
+                padding: 10px 15px; 
+                border-radius: 15px; 
+                border-bottom-${isMe ? 'right' : 'left'}-radius: 0;
+                max-width: 80%; 
+                box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            ">
+                <div style="font-weight: 600; font-size: 0.8rem; margin-bottom: 4px; color: ${isMe ? '#0f5132' : '#0d6efd'};">
+                    ${post.author_name} <span style="font-weight: normal; color: #666; font-size: 0.7rem;">• ${post.role.toUpperCase()}</span>
+                </div>
+                <div style="white-space: pre-wrap;">${post.content}</div>
+                <div style="font-size: 0.7rem; color: #888; text-align: right; margin-top: 5px;">${post.created_at}</div>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+
+    // Scroll to bottom
+    container.scrollTop = container.scrollHeight;
+
+    // Toggle Resolve Button
+    const resolveBtn = document.getElementById('resolveBtn');
+    if (resolveBtn) {
+        if (thread.status === 'resolved') {
+            resolveBtn.disabled = true;
+            resolveBtn.innerHTML = '<i class="fas fa-check-circle"></i> Resolved';
+        } else {
+            resolveBtn.disabled = false;
+            resolveBtn.innerHTML = '<i class="fas fa-check"></i> Mark as Resolved';
+        }
+    }
+}
+
+function submitQueryReply() {
+    if (!activeThreadId || !currentUser) return;
+
+    const content = document.getElementById('replyContent').value;
+    const fileInput = document.getElementById('replyFile');
+    const file = fileInput ? fileInput.files[0] : null;
+
+    if (!content.trim() && !file) return;
+
+    const formData = new FormData();
+    formData.append('user_id', currentUser.id);
+    formData.append('role', 'student');
+    formData.append('content', content);
+    if (file) {
+        formData.append('file', file);
+    }
+
+    // Determine headers - fetch automatically sets boundary for FormData if Content-Type is NOT set
+    fetch(`/api/queries/${activeThreadId}/reply`, {
+        method: 'POST',
+        body: formData
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('replyContent').value = '';
+                if (fileInput) fileInput.value = ''; // Clear file input
+                if (document.getElementById('fileNameDisplay')) document.getElementById('fileNameDisplay').textContent = '';
+
+                // Refresh thread
+                openQueryThread(activeThreadId);
+                // Refresh list in background to update 'last message'
+                loadAcademicQueries();
+            } else {
+                alert('Failed to send reply');
+            }
+        })
+        .catch(err => console.error(err));
+}
+
+function markQueryResolved() {
+    if (!activeThreadId) return;
+    if (!confirm("Are you sure you want to mark this query as resolved?")) return;
+
+    fetch(`/api/queries/${activeThreadId}/resolve`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                openQueryThread(activeThreadId); // Refresh UI
+                loadAcademicQueries(); // Update list status
+            }
+        });
+}
+
+function closeQueryThreadModal() {
+    const modal = document.getElementById('queryThreadModal');
+    if (modal) modal.style.display = 'none';
+    activeThreadId = null;
+}
+
+// --- Create Modal Logic ---
+
+function openCreateQueryModal() {
+    // Re-use logic for existing modal ID 'academicQueryModal' 
+    // Just ensure dropdowns are loaded
+    const modal = document.getElementById('academicQueryModal');
+    if (modal) {
+        modal.style.display = 'block';
+        loadSubjectDropdown();
+    }
+}
+
+function closeAcademicQueryModal() {
+    const modal = document.getElementById('academicQueryModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function loadSubjectDropdown() {
+    const select = document.getElementById('querySubject');
+    if (!select || select.options.length > 1) return; // Already loaded?
+
+    fetch('/api/common/subjects')
+        .then(res => res.json())
+        .then(subjects => {
+            select.innerHTML = '<option value="">Select Subject</option>';
+            subjects.forEach(sub => {
+                const opt = document.createElement('option');
+                opt.value = sub;
+                opt.textContent = sub;
+                select.appendChild(opt);
+            });
+        });
+}
+
+// Initialize Queries on Load functionality
+document.addEventListener('DOMContentLoaded', () => {
+    if (currentUser) {
+        // Preload if needed or verify section state
+    }
+
+    // Hook into navigation or just use the onclick handlers we added
+    const queriesLink = document.querySelector('a[href="#queries"]');
+    if (queriesLink) {
+        queriesLink.addEventListener('click', () => {
+            setTimeout(loadAcademicQueries, 100);
+        });
+    }
+});
+
+// --- Enhanced Query UI Helpers ---
+
+function toggleQueryType(type) {
+    const academic = document.getElementById('academicFields');
+    const mentor = document.getElementById('mentorFields');
+    if (!academic || !mentor) return;
+
+    if (type === 'academic') {
+        academic.style.display = 'block';
+        mentor.style.display = 'none';
+        // Reset required attribute if using HTML5 validation, but we used manual check in JS
+    } else {
+        academic.style.display = 'none';
+        mentor.style.display = 'block';
+    }
+}
+
+function loadFacultyForSubject() {
+    const subject = document.getElementById('querySubject').value;
+    const facultySelect = document.getElementById('queryFaculty');
+    if (!facultySelect) return;
+
+    if (!subject) {
+        facultySelect.innerHTML = '<option value="">Select Subject First</option>';
+        facultySelect.disabled = true;
+        return;
+    }
+
+    // Show Loading
+    facultySelect.innerHTML = '<option value="">Loading...</option>';
+    facultySelect.disabled = true;
+
+    fetch(`/api/faculty/by-subject?subject=${encodeURIComponent(subject)}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.length === 0) {
+                facultySelect.innerHTML = '<option value="">No faculty specific to this subject (Auto-assign)</option>';
+                // Keep enabled so they can see empty? Or keep logic to allow empty selection
+                facultySelect.disabled = false;
+            } else {
+                facultySelect.innerHTML = '<option value="">Select Faculty (Optional - Auto Assign)</option>';
+                data.forEach(fac => {
+                    const opt = document.createElement('option');
+                    opt.value = fac.id;
+                    opt.textContent = fac.name;
+                    facultySelect.appendChild(opt);
+                });
+                facultySelect.disabled = false;
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            facultySelect.innerHTML = '<option value="">Error loading faculty</option>';
+        });
+}
+
+// Logout function
+function logout() {
+    sessionStorage.removeItem('userData');
+    localStorage.removeItem('userData');
+    window.location.href = '/';
 }
